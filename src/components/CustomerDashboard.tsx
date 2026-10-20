@@ -11,7 +11,12 @@ import {
 import {
   calculateOrderPricing,
   formatRupiah,
+  formatDatePretty,
   formatCountdown,
+  getTodayIso,
+  getCurrentTimeHm,
+  isDatePast,
+  isTimeSlotPast,
   isDateHoliday,
   isSlotAvailable,
   isOrderLockedStatus,
@@ -121,9 +126,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   // Pilihan lokasi sesi: Studio vs Home Service (+Biaya Perjalanan)
   const [visitType, setVisitType] = useState<'studio' | 'home_service'>('studio');
 
-  // Calendar date state (starting Oct 19, 2026 for 30 days)
-  const [selectedDateIso, setSelectedDateIso] = useState<string>('2026-10-20');
-  const [selectedDatePretty, setSelectedDatePretty] = useState<string>('Sel, 20 Okt 2026');
+  // Calendar date state (otomatis default ke tanggal hari ini)
+  const [selectedDateIso, setSelectedDateIso] = useState<string>(() => getTodayIso());
+  const [selectedDatePretty, setSelectedDatePretty] = useState<string>(() =>
+    formatDatePretty(new Date())
+  );
 
   // Time slot selection
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
@@ -233,7 +240,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     setRefundModalOrder(null);
   };
 
-  // Generate 30 days dates starting 19 Oct 2026
+  const todayIso = getTodayIso(nowMs);
+  const currentTimeHm = getCurrentTimeHm(nowMs);
+
+  // Generate kalender: menampilkan 2 hari sebelumnya (misal tgl 18 & 19 yang otomatis abu-abu/terlewat) + hari ini (tgl 20) + 29 hari ke depan
   const calendarDays = React.useMemo(() => {
     const days: Array<{
       iso: string;
@@ -242,6 +252,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       dayNum: number;
       monthName: string;
       isHoliday: boolean;
+      isPast: boolean;
+      isToday: boolean;
     }> = [];
 
     const dayLabels = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
@@ -259,9 +271,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       'Nov',
       'Des',
     ];
-    const start = new Date(2026, 9, 19); // Oct 19, 2026
+    const nowDate = new Date(nowMs);
+    const start = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - 2);
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 32; i++) {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       const yyyy = d.getFullYear();
@@ -271,6 +284,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       const dayIdx = d.getDay();
       const pretty = `${dayLabels[dayIdx]}, ${d.getDate()} ${monthLabels[d.getMonth()]} ${yyyy}`;
       const holiday = isDateHoliday(iso, dayIdx, closedWeekdays, closedSpecificDates);
+      const past = iso < todayIso;
 
       days.push({
         iso,
@@ -279,10 +293,32 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         dayNum: d.getDate(),
         monthName: monthLabels[d.getMonth()],
         isHoliday: holiday,
+        isPast: past,
+        isToday: iso === todayIso,
       });
     }
     return days;
-  }, [closedWeekdays, closedSpecificDates]);
+  }, [closedWeekdays, closedSpecificDates, todayIso]);
+
+  // Otomatis koreksi jika tanggal terpilih sudah lewat atau hari libur, serta reset jam jika sudah terlewat
+  useEffect(() => {
+    if (isDatePast(selectedDateIso, nowMs)) {
+      const firstOpen = calendarDays.find((d) => !d.isPast && !d.isHoliday);
+      if (firstOpen) {
+        setSelectedDateIso(firstOpen.iso);
+        setSelectedDatePretty(firstOpen.pretty);
+      } else {
+        setSelectedDateIso(todayIso);
+        setSelectedDatePretty(formatDatePretty(new Date(nowMs)));
+      }
+      setSelectedTimeSlot(null);
+      return;
+    }
+
+    if (selectedTimeSlot && isTimeSlotPast(selectedDateIso, selectedTimeSlot, nowMs)) {
+      setSelectedTimeSlot(null);
+    }
+  }, [nowMs, todayIso, selectedDateIso, selectedTimeSlot, calendarDays]);
 
   // Pricing calculation
   const pricing = calculateOrderPricing(
@@ -328,7 +364,19 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     }
   };
 
-  const handleDateSelect = (iso: string, pretty: string, isHoliday: boolean) => {
+  const handleDateSelect = (
+    iso: string,
+    pretty: string,
+    isHoliday: boolean,
+    isPast: boolean = false
+  ) => {
+    if (isPast || isDatePast(iso, nowMs)) {
+      onShowToast(
+        isEn ? 'Date Has Passed' : 'Tanggal Sudah Terlewat',
+        `Tanggal ${pretty} sudah terlewat dan terkunci. Silakan pilih tanggal hari ini atau tanggal berikutnya yang masih tersedia.`
+      );
+      return;
+    }
     if (isHoliday) {
       onShowToast(
         isEn ? 'Closed on Selected Date' : 'Jadwal Sedang Libur',
@@ -360,12 +408,27 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   // Dari Langkah 2 -> Langkah 3
   const handleGoToStep3 = () => {
+    if (isDatePast(selectedDateIso, nowMs)) {
+      onShowToast(
+        'Tanggal Sudah Terlewat',
+        'Tanggal yang dipilih sudah terlewat. Silakan pilih tanggal hari ini atau tanggal berikutnya.'
+      );
+      return;
+    }
     if (!selectedTimeSlot) {
       onShowToast(
         isEn ? 'Select Session Time' : 'Pilih Jam Sesi Terapi',
         isEn
           ? 'Please select an available time slot before proceeding to payment.'
           : 'Silakan pilih salah satu jam sesi terapi yang tersedia pada Langkah 2 sebelum lanjut ke pembayaran.'
+      );
+      return;
+    }
+    if (isTimeSlotPast(selectedDateIso, selectedTimeSlot, nowMs)) {
+      setSelectedTimeSlot(null);
+      onShowToast(
+        'Jam Sesi Sudah Terlewat',
+        `Jam ${selectedTimeSlot} WIB pada hari ini sudah terlewat (Waktu sekarang: ${currentTimeHm} WIB). Silakan pilih jam berikutnya yang masih tersedia.`
       );
       return;
     }
@@ -377,6 +440,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const handleConfirmStep3Payment = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedTimeSlot) return;
+
+    if (isDatePast(selectedDateIso, nowMs) || isTimeSlotPast(selectedDateIso, selectedTimeSlot, nowMs)) {
+      setSelectedTimeSlot(null);
+      goToStep(2);
+      onShowToast(
+        'Jadwal Sudah Terlewat',
+        'Tanggal atau jam sesi yang Anda pilih baru saja terlewat. Silakan pilih jadwal lain yang masih aktif.'
+      );
+      return;
+    }
 
     const requiresProof = step3MethodType === 'qris' || step3MethodType === 'bank_transfer';
     if (requiresProof && !step3ProofImage) {
@@ -1063,12 +1136,35 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   {calendarDays.map((item) => {
                     const isSelected = item.iso === selectedDateIso;
 
+                    // Tanggal yang sudah terlewat (misal tanggal 19 dan sebelumnya saat hari ini tanggal 20) -> ABU-ABU & TERKUNCI
+                    if (item.isPast) {
+                      return (
+                        <button
+                          key={item.iso}
+                          type="button"
+                          disabled
+                          aria-label={`Tanggal ${item.pretty} Sudah Terlewat`}
+                          className="flex-shrink-0 w-14 py-2 rounded-2xl border border-stone-300 bg-stone-200 text-stone-400 flex flex-col items-center justify-center cursor-not-allowed opacity-85"
+                        >
+                          <span className="text-[9px] font-black uppercase text-stone-400">
+                            {item.dayName}
+                          </span>
+                          <span className="text-sm font-black leading-tight my-0.5 line-through text-stone-400">
+                            {item.dayNum}
+                          </span>
+                          <span className="text-[8px] font-black bg-stone-300 text-stone-600 px-1.5 rounded uppercase">
+                            {isEn ? 'PAST' : 'LEWAT'}
+                          </span>
+                        </button>
+                      );
+                    }
+
                     if (item.isHoliday) {
                       return (
                         <button
                           key={item.iso}
                           type="button"
-                          onClick={() => handleDateSelect(item.iso, item.pretty, true)}
+                          onClick={() => handleDateSelect(item.iso, item.pretty, true, false)}
                           className="flex-shrink-0 w-14 py-2 rounded-2xl border border-red-200 bg-red-50/80 text-red-400 flex flex-col items-center justify-center cursor-not-allowed"
                         >
                           <span className="text-[9px] font-black uppercase">{item.dayName}</span>
@@ -1086,7 +1182,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       <button
                         key={item.iso}
                         type="button"
-                        onClick={() => handleDateSelect(item.iso, item.pretty, false)}
+                        onClick={() => handleDateSelect(item.iso, item.pretty, false, false)}
                         className={`tactile-btn flex-shrink-0 w-14 py-2 rounded-2xl border-2 transition flex flex-col items-center justify-center ${
                           isSelected
                             ? 'bg-[#0B261C] text-white border-[#D4AF37] shadow-sm'
@@ -1103,13 +1199,25 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         <span className="text-sm font-black leading-tight my-0.5">
                           {item.dayNum}
                         </span>
-                        <span
-                          className={`text-[9px] font-semibold ${
-                            isSelected ? 'text-emerald-200' : 'text-stone-500'
-                          }`}
-                        >
-                          {item.monthName}
-                        </span>
+                        {item.isToday ? (
+                          <span
+                            className={`text-[8px] font-black px-1.5 rounded uppercase ${
+                              isSelected
+                                ? 'bg-[#D4AF37] text-[#0B261C]'
+                                : 'bg-emerald-100 text-emerald-900'
+                            }`}
+                          >
+                            {isEn ? 'TODAY' : 'HARI INI'}
+                          </span>
+                        ) : (
+                          <span
+                            className={`text-[9px] font-semibold ${
+                              isSelected ? 'text-emerald-200' : 'text-stone-500'
+                            }`}
+                          >
+                            {item.monthName}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -1118,7 +1226,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
               {/* BAGIAN B: GRID SLOT JAM OPERASIONAL (SISTEM JAM ABU-ABU TERKUNCI) */}
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-stone-200/90 space-y-3.5">
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center gap-2 flex-wrap">
                   <div>
                     <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
                       {isEn ? 'Step 2B • Operating Hours' : 'Langkah 2B • Jam Operasional'}
@@ -1127,21 +1235,25 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       {isEn ? 'Select Session Time' : 'Pilih Jam Sesi Terapi'}
                     </h2>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-stone-500">
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-stone-500 flex-wrap">
+                    <span className="bg-emerald-50 text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded-lg font-black">
+                      🕒 {currentTimeHm} WIB
+                    </span>
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-2.5 rounded-xs bg-white border border-emerald-700 inline-block"></span>{' '}
                       {isEn ? 'Open' : 'Tersedia'}
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-2.5 rounded-xs bg-stone-300 inline-block"></span>{' '}
-                      {isEn ? 'Locked' : 'Penuh/Tutup'}
+                      {isEn ? 'Passed/Locked' : 'Lewat/Penuh'}
                     </span>
                   </div>
                 </div>
 
                 <p className="text-[11px] text-amber-950 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl font-medium leading-relaxed">
-                  ⚡ <b>Sistem Cepat-Cepatan:</b> Slot jam otomatis berubah menjadi{' '}
-                  <b>abu-abu (Terkunci)</b> begitu pembayaran pelanggan dinyatakan <b>Berhasil</b>.
+                  ⚡ <b>Aturan Ketertiban Jadwal:</b> Tanggal dan jam yang{' '}
+                  <b>sudah terlewat</b> maupun yang <b>sudah dibooking</b> otomatis berwarna{' '}
+                  <b>abu-abu (Terkunci)</b> dan tidak dapat dipilih.
                 </p>
 
                 <div className="grid grid-cols-3 gap-2.5">
@@ -1150,9 +1262,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       slot.time,
                       selectedDateIso,
                       masterTimeSlots,
-                      bookings
+                      bookings,
+                      nowMs
                     );
                     const isSelected = selectedTimeSlot === slot.time;
+
+                    // Jam yang sudah terlewat pada hari ini (misal jam 09:00 & 11:00 saat pukul 11:46) -> ABU-ABU & TERKUNCI
+                    if (status.reason === 'past') {
+                      return (
+                        <button
+                          key={slot.time}
+                          type="button"
+                          disabled
+                          aria-label={`Jam ${slot.time} Sudah Terlewat`}
+                          className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
+                        >
+                          <span className="text-xs font-black line-through text-stone-400">
+                            {slot.time}
+                          </span>
+                          <span className="text-[9px] font-black uppercase text-stone-500 mt-0.5">
+                            <i className="fa-regular fa-clock text-[8px] mr-0.5"></i>{' '}
+                            {isEn ? 'Passed' : 'Terlewat'}
+                          </span>
+                        </button>
+                      );
+                    }
 
                     if (status.reason === 'booked') {
                       return (

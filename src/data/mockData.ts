@@ -247,90 +247,13 @@ export const INITIAL_TIME_SLOTS: TimeSlot[] = [
   { time: '11:00', active: true },
   { time: '13:00', active: true },
   { time: '15:00', active: true },
-  { time: '17:00', active: false }, // Jam istirahat sore
+  { time: '17:00', active: true },
   { time: '19:00', active: true },
 ];
 
-export const INITIAL_USERS: User[] = [
-  {
-    name: 'Kak Nadia',
-    phone: '081288997766',
-    pass: '123456',
-    points: 65,
-    role: 'customer',
-  },
-  {
-    name: 'Mas Riko (Atlet)',
-    phone: '081399881122',
-    pass: '123456',
-    points: 40,
-    role: 'customer',
-  },
-  {
-    name: 'Siti Aminah',
-    phone: '081234567890',
-    pass: '123456',
-    points: 30,
-    role: 'customer',
-  },
-];
+export const INITIAL_USERS: User[] = [];
 
-export const INITIAL_BOOKINGS: BookingOrder[] = [
-  {
-    id: 101,
-    customer: 'Mas Riko (Atlet)',
-    wa: '081399881122',
-    items: 'Release Muscle (Perbaikan Otot - Full Body) (90 Menit)',
-    date: '2026-10-20',
-    datePretty: 'Sel, 20 Okt 2026',
-    time: '11:00',
-    total: 400000,
-    ptsEarned: 20,
-    payMethod: 'QRIS Otomatis (GoPay / E-Wallet / M-Banking)',
-    payMethodType: 'qris',
-    vaNumber: 'ID1026618031821',
-    paymentStatus: 'Berhasil',
-    expiresAt: Date.now() + 20 * 60 * 1000,
-    status: 'Paid',
-    createdAt: '19 Okt 2026, 14:20',
-  },
-  {
-    id: 102,
-    customer: 'Kak Nadia',
-    wa: '081288997766',
-    items: 'Injury Muscle (Cidera Otot) [Pinggang / Saraf Kejepit (Low Back)]',
-    date: '2026-10-20',
-    datePretty: 'Sel, 20 Okt 2026',
-    time: '15:00',
-    total: 250000,
-    ptsEarned: 15,
-    payMethod: 'BCA Virtual Account',
-    payMethodType: 'va_bca',
-    vaNumber: '8801 8128 899776',
-    paymentStatus: 'Berhasil',
-    expiresAt: Date.now() + 20 * 60 * 1000,
-    status: 'Verified',
-    createdAt: '19 Okt 2026, 11:00',
-  },
-  {
-    id: 103,
-    customer: 'Siti Aminah',
-    wa: '081234567890',
-    items: 'Willness Massage (90 Menit) + Lulur Badan',
-    date: '2026-10-18',
-    datePretty: 'Min, 18 Okt 2026',
-    time: '13:00',
-    total: 370000,
-    ptsEarned: 22,
-    payMethod: 'Mandiri Virtual Account',
-    payMethodType: 'va_mandiri',
-    vaNumber: '8902 8123 456789',
-    paymentStatus: 'Berhasil',
-    expiresAt: Date.now() - 86400000,
-    status: 'Completed',
-    createdAt: '18 Okt 2026, 10:15',
-  },
-];
+export const INITIAL_BOOKINGS: BookingOrder[] = [];
 
 export const PROMO_TEMPLATES = [
   {
@@ -359,48 +282,5 @@ export const PROMO_TEMPLATES = [
   },
 ];
 
-export const INITIAL_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: 501,
-    target: 'admin',
-    type: 'payment_success',
-    title: '💰 Pembayaran Berhasil Masuk! — Mas Riko (Atlet)',
-    message:
-      'Pembayaran otomatis sebesar Rp 500.000 via QRIS Otomatis untuk Paket Recovery Total pada Sel, 20 Okt 2026 • Jam 11:00 WIB telah BERHASIL (Lunas). Jam 11:00 otomatis terkunci.',
-    createdAt: '19 Okt 2026, 14:20',
-    read: false,
-    orderId: 101,
-    customerName: 'Mas Riko (Atlet)',
-    customerWa: '081399881122',
-    waConfirmationText:
-      'Halo Kak *Mas Riko (Atlet)* 🙏✨\nPerkenalkan saya *Admin Rismawati* dari *Griya Ayu Sport Massage & Spa (AIFMO-P)*.\n\nKami mengonfirmasi bahwa *PEMBAYARAN KAKAK TELAH BERHASIL KAMI TERIMA (LUNAS)* dan jadwal terapi Kakak sudah *RESMI TERKUNCI* pada *Sel, 20 Okt 2026 • Jam 11:00 WIB*.\n\n📍 *Alamat Lokasi Griya Ayu:*\n*PERUMAHAN GRAHA CIPTA 5 BLOK E7 NO.3*\n🗺️ *Google Maps:* https://maps.app.goo.gl/CZY9eDC922v1byZQA\n\nMohon hadir 10 menit sebelum sesi dimulai ya Kak. Terima kasih! 🌿',
-    waConfirmationUrl:
-      'https://wa.me/6281399881122?text=' +
-      encodeURIComponent(
-        'Halo Kak *Mas Riko (Atlet)* 🙏✨\nPerkenalkan saya *Admin Rismawati* dari *Griya Ayu Sport Massage & Spa (AIFMO-P)*.\n\nKami mengonfirmasi bahwa *PEMBAYARAN KAKAK TELAH BERHASIL KAMI TERIMA (LUNAS)* dan jadwal terapi Kakak sudah *RESMI TERKUNCI* pada *Sel, 20 Okt 2026 • Jam 11:00 WIB*.\n\n📍 *Alamat Lokasi Griya Ayu:*\n*PERUMAHAN GRAHA CIPTA 5 BLOK E7 NO.3*\n🗺️ *Google Maps:* https://maps.app.goo.gl/CZY9eDC922v1byZQA\n\nMohon hadir 10 menit sebelum sesi dimulai ya Kak. Terima kasih! 🌿'
-      ),
-  },
-  {
-    id: 502,
-    target: 'all_customers',
-    type: 'promo_broadcast',
-    title: PROMO_TEMPLATES[0].title,
-    message: PROMO_TEMPLATES[0].message,
-    promoImage: PROMO_TEMPLATES[0].imageUrl,
-    promoCode: PROMO_TEMPLATES[0].promoCode,
-    createdAt: '19 Okt 2026, 09:00',
-    read: false,
-  },
-  {
-    id: 503,
-    target: 'customer',
-    targetPhone: '081288997766',
-    type: 'admin_confirmed',
-    title: '✅ Jadwal Terapi Terkonfirmasi Admin — 15:00 WIB',
-    message:
-      'Admin Rismawati telah mengonfirmasi pembayaran Rp 250.000 (BCA Virtual Account) untuk sesi Injury Treatment pada Sel, 20 Okt 2026 • Jam 15:00 WIB. Slot jam Anda resmi terkunci.\n📍 Lokasi Griya Ayu: PERUMAHAN GRAHA CIPTA 5 BLOK E7 NO.3 // https://maps.app.goo.gl/CZY9eDC922v1byZQA',
-    createdAt: '19 Okt 2026, 11:05',
-    read: false,
-    orderId: 102,
-  },
-];
+export const INITIAL_NOTIFICATIONS: AppNotification[] = [];
+

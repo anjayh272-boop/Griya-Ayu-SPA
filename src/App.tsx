@@ -40,10 +40,14 @@ import { CustomerDashboard } from './components/CustomerDashboard.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
 
 export default function App() {
-  // Initialize registered customers in localStorage if not present
+  // Bersihkan cache data uji coba lama di browser agar aplikasi mulai 100% bersih (kecuali Admin)
   useEffect(() => {
-    if (!localStorage.getItem('griya_ayu_customers')) {
-      localStorage.setItem('griya_ayu_customers', JSON.stringify(INITIAL_USERS));
+    localStorage.removeItem('griya_ayu_bookings_v2');
+    localStorage.removeItem('griya_ayu_notifications_v3');
+    localStorage.removeItem('griya_ayu_customers');
+    localStorage.removeItem('griya_ayu_slots');
+    if (!localStorage.getItem('griya_ayu_customers_live')) {
+      localStorage.setItem('griya_ayu_customers_live', JSON.stringify(INITIAL_USERS));
     }
   }, []);
 
@@ -60,22 +64,22 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   const [bookings, setBookings] = useState<BookingOrder[]>(() => {
-    const saved = localStorage.getItem('griya_ayu_bookings_v2');
+    const saved = localStorage.getItem('griya_ayu_bookings_live');
     return saved ? JSON.parse(saved) : INITIAL_BOOKINGS;
   });
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    const saved = localStorage.getItem('griya_ayu_notifications_v3');
+    const saved = localStorage.getItem('griya_ayu_notifications_live');
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
 
   const [masterTimeSlots, setMasterTimeSlots] = useState<TimeSlot[]>(() => {
-    const saved = localStorage.getItem('griya_ayu_slots');
+    const saved = localStorage.getItem('griya_ayu_slots_live');
     return saved ? JSON.parse(saved) : INITIAL_TIME_SLOTS;
   });
 
   const [closedWeekdays, setClosedWeekdays] = useState<number[]>([0]); // Minggu libur rutin
-  const [closedSpecificDates, setClosedSpecificDates] = useState<string[]>(['2026-10-22']);
+  const [closedSpecificDates, setClosedSpecificDates] = useState<string[]>([]);
 
   // Modals & Popups
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -111,15 +115,15 @@ export default function App() {
   }, [language]);
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_bookings_v2', JSON.stringify(bookings));
+    localStorage.setItem('griya_ayu_bookings_live', JSON.stringify(bookings));
   }, [bookings]);
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_notifications_v3', JSON.stringify(notifications));
+    localStorage.setItem('griya_ayu_notifications_live', JSON.stringify(notifications));
   }, [notifications]);
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_slots', JSON.stringify(masterTimeSlots));
+    localStorage.setItem('griya_ayu_slots_live', JSON.stringify(masterTimeSlots));
   }, [masterTimeSlots]);
 
   // Helper trigger celebration
@@ -176,13 +180,13 @@ export default function App() {
     if (isAdmin) {
       localStorage.setItem('griya_ayu_admin_profile', JSON.stringify(updatedUser));
     } else {
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers');
+      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
       if (savedUsersStr) {
         const list: User[] = JSON.parse(savedUsersStr);
         const idx = list.findIndex((u) => u.phone === updatedUser.phone);
         if (idx !== -1) {
           list[idx] = updatedUser;
-          localStorage.setItem('griya_ayu_customers', JSON.stringify(list));
+          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
         }
       }
     }
@@ -268,13 +272,13 @@ export default function App() {
       };
       setCurrentUser(updatedUser);
 
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers');
+      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
       if (savedUsersStr) {
         const list: User[] = JSON.parse(savedUsersStr);
         const idx = list.findIndex((u) => u.phone === currentUser.phone);
         if (idx !== -1) {
           list[idx].points = updatedUser.points;
-          localStorage.setItem('griya_ayu_customers', JSON.stringify(list));
+          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
         }
       }
     }
@@ -449,13 +453,13 @@ export default function App() {
       };
       setCurrentUser(updatedUser);
 
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers');
+      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
       if (savedUsersStr) {
         const list: User[] = JSON.parse(savedUsersStr);
         const idx = list.findIndex((u) => u.phone === currentUser.phone);
         if (idx !== -1) {
           list[idx].points = updatedUser.points;
-          localStorage.setItem('griya_ayu_customers', JSON.stringify(list));
+          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
         }
       }
     }
@@ -588,7 +592,7 @@ export default function App() {
       setCurrentUser((prev) => (prev ? applyPointsCompletion(prev, targetOrder.ptsEarned) : prev));
     }
 
-    const savedUsersStr = localStorage.getItem('griya_ayu_customers');
+    const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
     if (savedUsersStr) {
       const list: User[] = JSON.parse(savedUsersStr);
       const idx = list.findIndex(
@@ -596,7 +600,7 @@ export default function App() {
       );
       if (idx !== -1) {
         list[idx].points += targetOrder.ptsEarned;
-        localStorage.setItem('griya_ayu_customers', JSON.stringify(list));
+        localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
       }
     }
 
@@ -696,7 +700,7 @@ export default function App() {
         );
       }
 
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers');
+      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
       if (savedUsersStr) {
         const list: User[] = JSON.parse(savedUsersStr);
         const idx = list.findIndex(
@@ -704,7 +708,7 @@ export default function App() {
         );
         if (idx !== -1) {
           list[idx].points = Math.max(0, list[idx].points + netPointDelta);
-          localStorage.setItem('griya_ayu_customers', JSON.stringify(list));
+          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
         }
       }
     }

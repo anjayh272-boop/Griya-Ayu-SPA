@@ -206,13 +206,13 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       );
       return;
     }
-    const savedStr = localStorage.getItem('griya_ayu_customers');
+    const savedStr = localStorage.getItem('griya_ayu_customers_live');
     if (savedStr) {
       const list: User[] = JSON.parse(savedStr);
       const idx = list.findIndex((u) => u.phone === selectedCustomerPhone);
       if (idx !== -1) {
         list[idx].pass = adminResetNewPass.trim();
-        localStorage.setItem('griya_ayu_customers', JSON.stringify(list));
+        localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
         onShowToast(
           'Sandi Pelanggan Direset! ✅',
           `Kata sandi untuk member ${list[idx].name} (${list[idx].phone}) berhasil diubah menjadi: ${adminResetNewPass.trim()}`
@@ -223,7 +223,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   };
 
   const storedCustomers: User[] = React.useMemo(() => {
-    const saved = localStorage.getItem('griya_ayu_customers');
+    const saved = localStorage.getItem('griya_ayu_customers_live');
     return saved ? JSON.parse(saved) : [];
   }, [activeSection]);
 

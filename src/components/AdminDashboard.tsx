@@ -89,7 +89,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [orderFilter, setOrderFilter] = useState<
     'all' | 'refund_pending' | 'active' | 'refund_done'
   >('all');
-  const [customDateInput, setCustomDateInput] = useState<string>('2026-10-22');
+  const [customDateInput, setCustomDateInput] = useState<string>(() => getTodayIso());
   const [newSlotTimeInput, setNewSlotTimeInput] = useState<string>('20:30');
   const [expandedConfirmOrderId, setExpandedConfirmOrderId] = useState<number | null>(null);
   const [previewProofOrder, setPreviewProofOrder] = useState<BookingOrder | null>(null);
@@ -166,7 +166,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const storedCustomers: User[] = React.useMemo(() => {
-    const saved = localStorage.getItem('griya_ayu_customers');
+    const saved = localStorage.getItem('griya_ayu_customers_live');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -1294,8 +1294,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   type="date"
                   value={customDateInput}
                   onChange={(e) => setCustomDateInput(e.target.value)}
-                  min="2026-10-19"
-                  max="2026-11-20"
+                  min={todayIso}
                   className="flex-1 px-2.5 py-1.5 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white"
                 />
                 <button

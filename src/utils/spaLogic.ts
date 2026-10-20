@@ -138,16 +138,54 @@ export function isOrderLockedStatus(order: BookingOrder): boolean {
   );
 }
 
-export function getTodayIso(): string {
-  const now = new Date();
+export function getTodayIso(nowMs: number = Date.now()): string {
+  const now = new Date(nowMs);
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
-export function getCurrentMonthPrefix(): string {
-  const now = new Date();
+export function getCurrentTimeHm(nowMs: number = Date.now()): string {
+  const now = new Date(nowMs);
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+/**
+ * Mengecek apakah suatu tanggal (YYYY-MM-DD) sudah terlewat dibandingkan hari ini.
+ */
+export function isDatePast(dateIso: string, nowMs: number = Date.now()): boolean {
+  const todayIso = getTodayIso(nowMs);
+  return dateIso < todayIso;
+}
+
+/**
+ * Mengecek apakah slot jam pada tanggal tertentu sudah terlewat dibandingkan waktu saat ini.
+ * Jika tanggal < hari ini -> otomatis terlewat.
+ * Jika tanggal === hari ini -> cek apakah jam:menit slot <= jam:menit sekarang.
+ */
+export function isTimeSlotPast(
+  dateIso: string,
+  timeStr: string,
+  nowMs: number = Date.now()
+): boolean {
+  const todayIso = getTodayIso(nowMs);
+  if (dateIso < todayIso) return true;
+  if (dateIso > todayIso) return false;
+
+  const [slotH, slotM] = timeStr.split(':').map(Number);
+  const slotMinutes = (slotH || 0) * 60 + (slotM || 0);
+
+  const now = new Date(nowMs);
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  return slotMinutes <= currentMinutes;
+}
+
+export function getCurrentMonthPrefix(nowMs: number = Date.now()): string {
+  const now = new Date(nowMs);
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   return `${y}-${m}`;
@@ -462,15 +500,22 @@ export function isDateHoliday(
 }
 
 /**
- * Slot jam terkunci (abu-abu) apabila pembayaran sudah BERHASIL atau sedang Menunggu Cek Refund Admin.
- * Apabila Admin menyetujui refund (status === 'Refund_Completed' / 'Cancelled'), slot jam otomatis terbuka kembali (unlock).
+ * Slot jam terkunci (abu-abu) apabila:
+ * 1) Tanggal atau jam sudah terlewat ('past')
+ * 2) Ditutup oleh Admin ('closed')
+ * 3) Sudah dibooking pelanggan lain ('booked')
  */
 export function isSlotAvailable(
   time: string,
   dateIso: string,
   masterSlots: TimeSlot[],
-  bookings: BookingOrder[]
-): { available: boolean; reason: 'available' | 'booked' | 'closed' } {
+  bookings: BookingOrder[],
+  nowMs: number = Date.now()
+): { available: boolean; reason: 'available' | 'booked' | 'closed' | 'past' } {
+  if (isTimeSlotPast(dateIso, time, nowMs)) {
+    return { available: false, reason: 'past' };
+  }
+
   const slotSetting = masterSlots.find((s) => s.time === time);
   if (!slotSetting || !slotSetting.active) {
     return { available: false, reason: 'closed' };
@@ -495,7 +540,6 @@ export function isSlotAvailable(
 
 /**
  * Mengecek apakah pesanan masih memenuhi batas waktu minimal 1 jam (>= 60 menit) sebelum jadwal SPA dimulai.
- * Kalender aplikasi berpatokan pada tanggal aktif '2026-10-20' sebagai hari ini dengan jam real-time perangkat.
  */
 export function checkBookingRefundEligibility(
   dateIso: string,
@@ -510,15 +554,15 @@ export function checkBookingRefundEligibility(
   const [hh, min] = timeStr.split(':').map(Number);
 
   const realNow = new Date(nowMs);
-  // Gunakan tanggal kalender aktif aplikasi (20 Okt 2026) jika jam sistem berada di luar Oktober 2026,
-  // namun tetap gunakan jam & menit real-time saat ini agar batas 1 jam akurat.
-  const isOct2026 = realNow.getFullYear() === 2026 && realNow.getMonth() === 9;
-  const referenceNow = isOct2026
-    ? realNow
-    : new Date(2026, 9, 20, realNow.getHours(), realNow.getMinutes(), realNow.getSeconds());
-
-  const targetDate = new Date(yyyy || 2026, (mm || 10) - 1, dd || 20, hh || 0, min || 0, 0);
-  const diffMs = targetDate.getTime() - referenceNow.getTime();
+  const targetDate = new Date(
+    yyyy || realNow.getFullYear(),
+    (mm || realNow.getMonth() + 1) - 1,
+    dd || realNow.getDate(),
+    hh || 0,
+    min || 0,
+    0
+  );
+  const diffMs = targetDate.getTime() - realNow.getTime();
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
 
   if (diffMinutes < 60) {

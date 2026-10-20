@@ -30,7 +30,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
   const getStoredCustomers = (): User[] => {
-    const savedUsersStr = localStorage.getItem('griya_ayu_customers');
+    const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
     if (savedUsersStr) {
       try {
         return JSON.parse(savedUsersStr);
@@ -38,7 +38,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         return INITIAL_USERS;
       }
     }
-    localStorage.setItem('griya_ayu_customers', JSON.stringify(INITIAL_USERS));
+    localStorage.setItem('griya_ayu_customers_live', JSON.stringify(INITIAL_USERS));
     return INITIAL_USERS;
   };
 
@@ -194,7 +194,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     };
 
     const updatedList = [...usersList, newCustomer];
-    localStorage.setItem('griya_ayu_customers', JSON.stringify(updatedList));
+    localStorage.setItem('griya_ayu_customers_live', JSON.stringify(updatedList));
 
     onRegisterSuccess(newCustomer);
   };
