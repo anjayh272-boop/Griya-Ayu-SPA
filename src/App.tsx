@@ -22,6 +22,7 @@ import {
 import {
   applyPointsCompletion,
   formatRupiah,
+  getTodayIso,
   getPaymentMethodDetails,
   buildAdminWaConfirmationMessage,
   buildCustomerToAdminRefundWaMessage,
@@ -533,10 +534,16 @@ export default function App() {
   // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi "Terkonfirmasi (ACC Admin)"
   const handleVerifyPayment = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
+    const todayIso = getTodayIso();
     setBookings((prev) =>
       prev.map((b) =>
         b.id === orderId
-          ? { ...b, status: 'Verified', paymentStatus: 'Terkonfirmasi (ACC Admin)' }
+          ? {
+              ...b,
+              status: 'Verified',
+              paymentStatus: 'Terkonfirmasi (ACC Admin)',
+              verifiedDateIso: todayIso,
+            }
           : b
       )
     );
@@ -562,11 +569,17 @@ export default function App() {
   const handleCompleteTreatment = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
+    const todayIso = getTodayIso();
 
     setBookings((prev) =>
       prev.map((b) =>
         b.id === orderId
-          ? { ...b, status: 'Completed', paymentStatus: 'Terkonfirmasi (ACC Admin)' }
+          ? {
+              ...b,
+              status: 'Completed',
+              paymentStatus: 'Terkonfirmasi (ACC Admin)',
+              verifiedDateIso: b.verifiedDateIso || todayIso,
+            }
           : b
       )
     );

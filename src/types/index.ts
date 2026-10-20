@@ -82,6 +82,7 @@ export interface BookingOrder {
     | 'Refund_Requested'
     | 'Refund_Completed';
   createdAt: string;
+  verifiedDateIso?: string;
   paymentProofImage?: string;
   refundRequest?: RefundRequestInfo;
   refundRejectedReason?: string;

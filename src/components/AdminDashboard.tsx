@@ -8,7 +8,14 @@ import {
 } from '../types/index.ts';
 import {
   formatRupiah,
+  formatDatePretty,
+  getTodayIso,
+  getCurrentMonthPrefix,
+  formatMonthYearIndo,
   isOrderLockedStatus,
+  isTodayRevenueOrder,
+  isMonthRevenueOrder,
+  downloadMonthlyRevenueCsv,
   buildAdminWaConfirmationMessage,
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
@@ -91,6 +98,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     'Bukti pembayaran tidak ditemukan pada mutasi rekening atau tidak sesuai.'
   );
 
+  // State Laporan Keuangan Bulanan
+  const [selectedMonthPrefix, setSelectedMonthPrefix] = useState<string>(() =>
+    getCurrentMonthPrefix()
+  );
+  const [showMonthlyDetails, setShowMonthlyDetails] = useState<boolean>(false);
+
   // State Bot Broadcast Promo (Teks & Gambar)
   const [promoTitle, setPromoTitle] = useState<string>(PROMO_TEMPLATES[0].title);
   const [promoCode, setPromoCode] = useState<string>(PROMO_TEMPLATES[0].promoCode);
@@ -98,6 +111,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [promoMessage, setPromoMessage] = useState<string>(PROMO_TEMPLATES[0].message);
   const [botRunning, setBotRunning] = useState<boolean>(false);
   const [botSentList, setBotSentList] = useState<string[]>([]);
+
+  // Perhitungan Omzet Hari Ini (Real-Time) & Omzet Bulanan
+  const todayIso = getTodayIso();
+  const todayPretty = formatDatePretty(new Date());
+  const todayVerifiedOrders = bookings.filter((b) => isTodayRevenueOrder(b, todayIso));
+  const todayOmzetTotal = todayVerifiedOrders.reduce((sum, b) => sum + b.total, 0);
+  const todayWaitingVerifyCount = bookings.filter(
+    (b) =>
+      b.date === todayIso &&
+      (b.paymentStatus === 'Menunggu Verifikasi Admin' ||
+        b.paymentStatus === 'Booking Cash (Bayar di Lokasi)')
+  ).length;
+
+  const monthlyVerifiedOrders = bookings.filter((b) =>
+    isMonthRevenueOrder(b, selectedMonthPrefix)
+  );
+  const monthlyOmzetTotal = monthlyVerifiedOrders.reduce((sum, b) => sum + b.total, 0);
+  const monthLabelIndo = formatMonthYearIndo(selectedMonthPrefix);
+
+  const handleDownloadMonthlyCsv = () => {
+    downloadMonthlyRevenueCsv(monthlyVerifiedOrders, selectedMonthPrefix);
+    onShowToast(
+      'Laporan Bulanan Diunduh (CSV/Excel)! 📊',
+      `File "Laporan_Omzet_Bulanan_Griya_Ayu_${selectedMonthPrefix}.csv" (${monthlyVerifiedOrders.length} transaksi • Total ${formatRupiah(
+        monthlyOmzetTotal
+      )}) berhasil diunduh dan siap dibuka di Microsoft Excel.`
+    );
+  };
 
   const adminNotifications = notifications.filter((n) => n.target === 'admin');
   const unreadAdminNotifs = adminNotifications.filter((n) => !n.read).length;
@@ -1367,17 +1408,138 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* SUB-TAB 4: BAR AKUN KHUSUS ADMIN                                */}
         {/* =============================================================== */}
         {adminSubTab === 'account' && (
-          <AccountPanel
-            currentUser={currentUser}
-            isAdmin={true}
-            bookings={bookings}
-            language={language}
-            onChangeLanguage={onChangeLanguage}
-            onUpdateUser={onUpdateUser}
-            onViewReceipt={onViewReceipt}
-            onLogout={onLogout}
-            onShowToast={onShowToast}
-          />
+          <div className="space-y-3.5 animate-page-enter">
+            {/* PANEL LAPORAN KEUANGAN ADMIN: OMZET HARI INI & OMZET BULANAN (KHUSUS DI BAR AKUN) */}
+            <section
+              aria-label="Ringkasan Laporan Keuangan Admin"
+              className="bg-gradient-to-br from-[#071A12] via-[#0B261C] to-stone-900 text-white p-4 rounded-2xl border-2 border-[#D4AF37] shadow-lg space-y-3"
+            >
+              {/* 1. KARTU RINGKASAN OMZET HARI INI (REAL-TIME) */}
+              <div className="flex items-start justify-between gap-2 pb-3 border-b border-white/15">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                      <span>OMZET HARI INI (REAL-TIME)</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-200/90">{todayPretty}</span>
+                  </div>
+
+                  <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#FFF3B0] via-[#D4AF37] to-[#F3E5AB] tracking-tight">
+                    {formatRupiah(todayOmzetTotal)}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                    <span className="text-emerald-200 font-bold flex items-center gap-1">
+                      <i className="fa-solid fa-circle-check text-emerald-400"></i>
+                      <span>{todayVerifiedOrders.length} Pesanan Sukses Terverifikasi Hari Ini</span>
+                    </span>
+                    {todayWaitingVerifyCount > 0 && (
+                      <span className="bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-md font-bold text-[9px]">
+                        ⏳ {todayWaitingVerifyCount} Menunggu ACC
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. REKAPITULASI OMZET BULANAN & TOMBOL UNDUH EXCEL (CSV) */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-amber-300 block">
+                      REKAPITULASI OMZET BULANAN
+                    </span>
+                    <div className="flex items-baseline gap-2 mt-0.5">
+                      <span className="text-base font-black text-white">
+                        {formatRupiah(monthlyOmzetTotal)}
+                      </span>
+                      <span className="text-[10px] text-stone-300 font-semibold">
+                        ({monthlyVerifiedOrders.length} Transaksi • {monthLabelIndo})
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="month"
+                      aria-label="Pilih Bulan Laporan Omzet"
+                      value={selectedMonthPrefix}
+                      onChange={(e) =>
+                        setSelectedMonthPrefix(e.target.value || getCurrentMonthPrefix())
+                      }
+                      className="bg-black/40 text-amber-200 border border-[#D4AF37]/50 rounded-xl px-2 py-1 text-[10px] font-bold"
+                    />
+                  </div>
+                </div>
+
+                {/* Rincian Singkat Rekap Bulanan (Collapsible) */}
+                {showMonthlyDetails && (
+                  <div className="bg-black/35 rounded-xl border border-white/15 p-2.5 space-y-1.5 max-h-44 overflow-y-auto text-[10px]">
+                    <div className="flex justify-between items-center text-[9px] font-black text-amber-300 border-b border-white/10 pb-1">
+                      <span>RINCIAN TRANSAKSI ({monthLabelIndo.toUpperCase()})</span>
+                      <span>NOMINAL OMZET</span>
+                    </div>
+                    {monthlyVerifiedOrders.length === 0 ? (
+                      <p className="text-stone-400 text-center py-2">
+                        Belum ada transaksi terverifikasi pada bulan {monthLabelIndo}.
+                      </p>
+                    ) : (
+                      monthlyVerifiedOrders.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex justify-between items-start gap-2 py-1 border-b border-white/5 last:border-none"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-black text-white truncate">
+                              {item.datePretty} • {item.customer}
+                            </p>
+                            <p className="text-[9px] text-emerald-200 truncate">{item.items}</p>
+                            <p className="text-[9px] text-stone-400">{item.payMethod}</p>
+                          </div>
+                          <span className="font-black text-[#D4AF37] whitespace-nowrap">
+                            {formatRupiah(item.total)}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Baris Tombol Unduh Laporan Bulanan (Excel/CSV) & Toggle Rincian */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadMonthlyCsv}
+                    className="tactile-btn gold-shimmer-card flex-1 min-h-[42px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#071A12] font-black py-2.5 px-3 rounded-xl text-[11px] border border-amber-200 shadow-md flex items-center justify-center gap-2"
+                  >
+                    <i className="fa-solid fa-file-excel text-emerald-950 text-sm"></i>
+                    <span>Unduh Laporan Bulanan (Excel/CSV)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowMonthlyDetails((prev) => !prev)}
+                    className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-200 border border-white/20 font-bold px-3 py-2 rounded-xl text-[10px] whitespace-nowrap"
+                  >
+                    {showMonthlyDetails ? 'Tutup Rincian' : 'Rincian'}
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <AccountPanel
+              currentUser={currentUser}
+              isAdmin={true}
+              bookings={bookings}
+              language={language}
+              onChangeLanguage={onChangeLanguage}
+              onUpdateUser={onUpdateUser}
+              onViewReceipt={onViewReceipt}
+              onLogout={onLogout}
+              onShowToast={onShowToast}
+            />
+          </div>
         )}
       </div>
 

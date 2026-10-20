@@ -138,6 +138,194 @@ export function isOrderLockedStatus(order: BookingOrder): boolean {
   );
 }
 
+export function getTodayIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getCurrentMonthPrefix(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+export function formatMonthYearIndo(monthPrefix: string): string {
+  const [y, m] = monthPrefix.split('-');
+  const months = [
+    'Januari',
+    'Februari',
+    'Maret',
+    'April',
+    'Mei',
+    'Juni',
+    'Juli',
+    'Agustus',
+    'September',
+    'Oktober',
+    'November',
+    'Desember',
+  ];
+  const mIdx = Math.max(0, Math.min(11, parseInt(m || '10', 10) - 1));
+  return `${months[mIdx]} ${y || '2026'}`;
+}
+
+/**
+ * Mengecek apakah pesanan merupakan pendapatan yang sah / sukses terverifikasi
+ * (Bukan batal, bukan refund, bukan gagal/pending).
+ */
+export function isVerifiedRevenueOrder(order: BookingOrder): boolean {
+  if (
+    order.status === 'Cancelled' ||
+    order.status === 'Refund_Requested' ||
+    order.status === 'Refund_Completed' ||
+    order.paymentStatus === 'Refund Selesai / Dibatalkan' ||
+    order.paymentStatus === 'Menunggu Cek Refund Admin' ||
+    order.paymentStatus === 'Gagal' ||
+    order.paymentStatus === 'Kedaluwarsa' ||
+    order.paymentStatus === 'Pending'
+  ) {
+    return false;
+  }
+  return (
+    order.paymentStatus === 'Terkonfirmasi (ACC Admin)' ||
+    order.paymentStatus === 'Berhasil' ||
+    order.status === 'Verified' ||
+    order.status === 'Completed'
+  );
+}
+
+export function isTodayRevenueOrder(order: BookingOrder, todayIso: string = getTodayIso()): boolean {
+  if (!isVerifiedRevenueOrder(order)) return false;
+  return order.date === todayIso || order.verifiedDateIso === todayIso;
+}
+
+export function isMonthRevenueOrder(
+  order: BookingOrder,
+  monthPrefix: string = getCurrentMonthPrefix()
+): boolean {
+  if (!isVerifiedRevenueOrder(order)) return false;
+  return (
+    order.date.startsWith(monthPrefix) ||
+    Boolean(order.verifiedDateIso && order.verifiedDateIso.startsWith(monthPrefix))
+  );
+}
+
+function escapeCsvCell(val: string | number): string {
+  const str = String(val ?? '').replace(/"/g, '""');
+  return `"${str}"`;
+}
+
+export function downloadMonthlyRevenueCsv(
+  orders: BookingOrder[],
+  monthPrefix: string = getCurrentMonthPrefix()
+): void {
+  const monthLabel = formatMonthYearIndo(monthPrefix);
+  const sorted = [...orders].sort((a, b) => {
+    const dCmp = a.date.localeCompare(b.date);
+    if (dCmp !== 0) return dCmp;
+    return a.time.localeCompare(b.time);
+  });
+
+  const totalOmzet = sorted.reduce((sum, item) => sum + item.total, 0);
+
+  const headers = [
+    'No',
+    'ID Booking',
+    'Tanggal',
+    'Jam (WIB)',
+    'Nama Pelanggan',
+    'No. WhatsApp',
+    'Layanan',
+    'Metode Pembayaran',
+    'Status Verifikasi',
+    'Nominal Omzet (Rp)',
+    'Nominal Terformat',
+  ];
+
+  const rows: string[] = [];
+  rows.push(
+    `"LAPORAN OMZET BULANAN GRIYA AYU SPORT MASSAGE & SPA — PERIODE ${monthLabel.toUpperCase()}"`
+  );
+  rows.push(`"Dicetak pada: ${new Date().toLocaleString('id-ID')}","Total Transaksi: ${sorted.length}","Total Omzet: ${formatRupiah(totalOmzet)}"`);
+  rows.push('');
+  rows.push(headers.map(escapeCsvCell).join(','));
+
+  if (sorted.length === 0) {
+    rows.push(
+      [
+        '-',
+        '-',
+        monthPrefix,
+        '-',
+        'Belum ada transaksi terverifikasi pada bulan ini',
+        '-',
+        '-',
+        '-',
+        '-',
+        0,
+        'Rp 0',
+      ]
+        .map(escapeCsvCell)
+        .join(',')
+    );
+  } else {
+    sorted.forEach((order, idx) => {
+      rows.push(
+        [
+          idx + 1,
+          `GA-${String(order.id).slice(-6)}`,
+          `${order.date} (${order.datePretty})`,
+          `${order.time} WIB`,
+          order.customer,
+          order.wa,
+          order.items,
+          order.payMethod,
+          order.paymentStatus,
+          order.total,
+          formatRupiah(order.total),
+        ]
+          .map(escapeCsvCell)
+          .join(',')
+      );
+    });
+  }
+
+  rows.push('');
+  rows.push(
+    [
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'TOTAL OMZET BULANAN',
+      totalOmzet,
+      formatRupiah(totalOmzet),
+    ]
+      .map(escapeCsvCell)
+      .join(',')
+  );
+
+  // Gunakan UTF-8 BOM (\uFEFF) agar langsung rapi saat dibuka di Microsoft Excel
+  const csvContent = '\uFEFF' + rows.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `Laporan_Omzet_Bulanan_Griya_Ayu_${monthPrefix}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Pesan WhatsApp otomatis dari Pelanggan ke Admin (di Struk Digital & Selesai Booking)
  */

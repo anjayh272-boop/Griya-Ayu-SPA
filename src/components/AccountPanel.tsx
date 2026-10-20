@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, BookingOrder, Language } from '../types/index.ts';
 import {
   formatRupiah,
+  isVerifiedRevenueOrder,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_ADDRESS,
@@ -235,7 +236,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       );
 
   const totalAdminRevenue = bookings
-    .filter((b) => b.paymentStatus === 'Berhasil')
+    .filter((b) => isVerifiedRevenueOrder(b))
     .reduce((sum, b) => sum + b.total, 0);
 
   const initials = currentUser.name
