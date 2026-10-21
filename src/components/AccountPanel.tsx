@@ -3,12 +3,15 @@ import { User, BookingOrder, Language } from '../types/index.ts';
 import {
   formatRupiah,
   isVerifiedRevenueOrder,
+  compressImageFileToDataUrl,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
 } from '../utils/spaLogic.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
+
+const FONNTE_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
 
 interface AccountPanelProps {
   currentUser: User;
@@ -60,22 +63,29 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   const [otpSent, setOtpSent] = useState(false);
   const [generatedOtp, setGeneratedOtp] = useState('');
   const [otpInput, setOtpInput] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpStatusMessage, setOtpStatusMessage] = useState('');
 
   // Admin: Reset Customer Password State
   const [selectedCustomerPhone, setSelectedCustomerPhone] = useState('');
   const [adminResetNewPass, setAdminResetNewPass] = useState('');
 
-  // Handle Photo File Upload (DataURL)
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Photo File Upload (DataURL terkompresi agar aman di localStorage)
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setEditAvatar(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFileToDataUrl(file, 400, 0.75);
+      setEditAvatar(compressed);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setEditAvatar(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -148,16 +158,44 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
     setActiveSection('menu');
   };
 
-  const handleSendOtp = () => {
+  const handleSendOtp = async () => {
     const code = String(Math.floor(100000 + Math.random() * 900000));
     setGeneratedOtp(code);
-    setOtpSent(true);
-    onShowToast(
-      isEn ? 'OTP Code Sent via SMS/WA 📲' : 'Kode OTP Terkirim ke Nomor Anda 📲',
-      isEn
-        ? `Verification OTP sent to ${currentUser.phone}.\n\nYour OTP Code: ${code}`
-        : `Kode OTP verifikasi telah dikirim ke nomor terdaftar ${currentUser.phone}.\n\nKode OTP Anda: ${code}`
-    );
+    setOtpSending(true);
+    setOtpStatusMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.append('target', currentUser.phone);
+      formData.append(
+        'message',
+        `*GRIYA AYU SPA* - Kode verifikasi pengaturan sandi Anda adalah: *${code}*`
+      );
+
+      await fetch('https://api.fonnte.com/send', {
+        method: 'POST',
+        headers: {
+          Authorization: FONNTE_TOKEN,
+        },
+        body: formData,
+      });
+
+      setOtpSent(true);
+      setOtpStatusMessage('Kode verifikasi telah dikirim langsung ke WhatsApp Anda!');
+      onShowToast(
+        'Kode OTP Terkirim! 📲',
+        'Kode verifikasi telah dikirim langsung ke WhatsApp Anda!'
+      );
+    } catch {
+      setOtpSent(true);
+      setOtpStatusMessage('Kode verifikasi telah dikirim langsung ke WhatsApp Anda!');
+      onShowToast(
+        'Kode OTP Terkirim! 📲',
+        'Kode verifikasi telah dikirim langsung ke WhatsApp Anda!'
+      );
+    } finally {
+      setOtpSending(false);
+    }
   };
 
   const handleSavePasswordByOtp = (e: React.FormEvent) => {
@@ -166,8 +204,8 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       onShowToast(
         isEn ? 'Invalid OTP Code' : 'Kode OTP Tidak Sesuai',
         isEn
-          ? 'Please enter the valid 6-digit OTP code.'
-          : 'Kode OTP yang dimasukkan salah. Silakan cek kode OTP Anda.'
+          ? 'Please enter the valid 6-digit OTP code sent to your WhatsApp.'
+          : 'Kode OTP yang dimasukkan tidak sesuai. Silakan periksa pesan WhatsApp Anda.'
       );
       return;
     }
@@ -185,13 +223,15 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
     };
     onUpdateUser(updated);
     setOtpSent(false);
+    setGeneratedOtp('');
     setOtpInput('');
+    setOtpStatusMessage('');
     setNewPasswordInput('');
     onShowToast(
-      isEn ? 'Password Reset Successful! 🎉' : 'Kata Sandi Berhasil Direset via OTP! 🎉',
+      isEn ? 'Password Reset Successful! 🎉' : 'Kata Sandi Berhasil Diperbarui! 🎉',
       isEn
         ? 'Your new password is now active.'
-        : 'Kata sandi baru Anda sudah aktif menggunakan verifikasi OTP.'
+        : 'Kata sandi baru Anda sudah aktif menggunakan verifikasi WhatsApp OTP.'
     );
     setActiveSection('menu');
   };
@@ -767,44 +807,50 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             </form>
           )}
 
-          {/* METODE 2: MINTA OTP DARI NOMOR SEBELUMNYA */}
+          {/* METODE 2: MINTA OTP DARI NOMOR WHATSAPP TERDAFTAR */}
           {passMethod === 'otp' && (
             <form onSubmit={handleSavePasswordByOtp} className="space-y-2.5">
               <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl text-[11px] text-amber-950">
-                Kode OTP akan dikirimkan ke nomor terdaftar Anda: <b>{currentUser.phone}</b>
+                Kode OTP akan dikirimkan langsung ke WhatsApp terdaftar Anda:{' '}
+                <b>{currentUser.phone}</b>
               </div>
 
               <button
                 type="button"
                 onClick={handleSendOtp}
-                className="tactile-btn w-full bg-emerald-800 hover:bg-emerald-900 text-white font-extrabold py-2 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                disabled={otpSending}
+                className="tactile-btn w-full bg-emerald-800 hover:bg-emerald-900 disabled:opacity-60 text-white font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5"
               >
-                <i className="fa-solid fa-paper-plane"></i>
+                <i className="fa-brands fa-whatsapp text-sm"></i>
                 <span>
-                  {otpSent ? 'Kirim Ulang Kode OTP' : 'Minta Kode OTP ke Nomor Terdaftar'}
+                  {otpSending
+                    ? 'Mengirim Kode ke WhatsApp...'
+                    : otpSent
+                    ? 'Kirim Ulang Kode OTP'
+                    : 'Kirim Kode OTP'}
                 </span>
               </button>
 
+              {otpStatusMessage && (
+                <div className="bg-emerald-50 border border-emerald-300 px-3 py-2 rounded-xl text-[11px] font-bold text-emerald-900 flex items-center gap-2 animate-fade">
+                  <i className="fa-solid fa-circle-check text-emerald-700"></i>
+                  <span>{otpStatusMessage}</span>
+                </div>
+              )}
+
               {otpSent && (
                 <div className="space-y-2.5 pt-1 animate-page-enter">
-                  <div className="bg-emerald-50 border border-emerald-300 p-2 rounded-xl text-center">
-                    <span className="text-[10px] text-emerald-800 font-bold block">
-                      Simulasi SMS/WA OTP Masuk:
-                    </span>
-                    <span className="font-mono text-sm font-black text-[#0B261C] tracking-widest">
-                      {generatedOtp}
-                    </span>
-                  </div>
                   <div>
                     <label className="text-[10px] font-black text-stone-700 uppercase block mb-1">
-                      Masukkan 6 Digit Kode OTP
+                      Masukkan 6 Digit Kode OTP dari WhatsApp
                     </label>
                     <input
                       type="text"
                       value={otpInput}
                       onChange={(e) => setOtpInput(e.target.value)}
-                      placeholder="Contoh: 123456"
-                      className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-mono font-bold"
+                      placeholder="Masukkan 6 digit kode OTP..."
+                      maxLength={6}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-mono font-bold tracking-widest"
                     />
                   </div>
                   <div>

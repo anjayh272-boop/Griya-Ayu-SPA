@@ -504,6 +504,8 @@ export function isDateHoliday(
  * 1) Tanggal atau jam sudah terlewat ('past')
  * 2) Ditutup oleh Admin ('closed')
  * 3) Sudah dibooking pelanggan lain ('booked')
+ * Catatan: Begitu pesanan dibatalkan atau diajukan refund ('Cancelled', 'Refund_Requested', 'Refund_Completed'),
+ * slot jam langsung kembali TIDAK TERKUNCI (terbuka kembali untuk pelanggan lain).
  */
 export function isSlotAvailable(
   time: string,
@@ -525,9 +527,12 @@ export function isSlotAvailable(
     (b) =>
       b.date === dateIso &&
       b.time === time &&
-      (isOrderLockedStatus(b) || b.paymentStatus === 'Menunggu Cek Refund Admin') &&
+      isOrderLockedStatus(b) &&
       b.status !== 'Cancelled' &&
+      b.status !== 'Refund_Requested' &&
       b.status !== 'Refund_Completed' &&
+      b.paymentStatus !== 'Menunggu Cek Refund Admin' &&
+      b.paymentStatus !== 'Refund Selesai / Dibatalkan' &&
       b.status !== 'Pending_Payment'
   );
 
@@ -595,28 +600,25 @@ export function buildCustomerToAdminRefundWaMessage(order: BookingOrder): string
   const req = order.refundRequest;
   const isCash = order.payMethodType === 'cash' || req?.isCashCancellation;
 
-  const text =
-    `*PENGAJUAN PEMBATALAN & REFUND - GRIYA AYU SPORT MASSAGE & SPA*\n` +
-    `----------------------------------------\n` +
-    `🧾 *No. Struk:* #${invoiceCode}\n` +
-    `👤 *Nama Pelanggan:* ${order.customer}\n` +
-    `📱 *No. WA:* ${order.wa}\n` +
-    `💆‍♀️ *Layanan:* ${order.items}\n` +
-    `📅 *Jadwal Sesi:* ${order.datePretty} • Jam ${order.time} WIB\n` +
-    `💳 *Metode Awal:* ${order.payMethod}\n` +
-    `💰 *Nominal:* ${formatRupiah(order.total)}\n\n` +
-    `📝 *DETAIL PENGAJUAN ${isCash ? 'PEMBATALAN' : 'REFUND'}:*\n` +
-    `• *Alasan Batal:* ${req?.reason || '-'}\n` +
-    (isCash
-      ? `• *Keterangan:* Pembatalan pesanan Cash / Bayar di Tempat\n`
-      : `• *Bank / E-Wallet Tujuan Refund:* ${req?.bankName || '-'}\n` +
-        `• *No. Rekening / E-Wallet:* ${req?.accountNumber || '-'}\n` +
-        `• *Atas Nama:* ${req?.accountHolder || '-'}\n` +
-        `• *Bukti TF/QRIS Awal:* Sudah diunggah di aplikasi\n`) +
-    `----------------------------------------\n` +
-    `Halo Admin Griya Ayu, saya mengajukan ${
-      isCash ? 'pembatalan jadwal' : 'pembatalan & pengembalian dana (refund)'
-    } untuk pesanan di atas (diajukan > 1 jam sebelum jadwal). Mohon dicek ya, terima kasih! 🙏`;
+  const text = isCash
+    ? `Halo Admin Griya Ayu, saya ingin mengonfirmasi pembatalan booking *#${invoiceCode}* (${order.items} pada ${order.datePretty} • Jam ${order.time} WIB).\n\n` +
+      `• *Nama Pelanggan:* ${order.customer}\n` +
+      `• *Alasan Pembatalan:* ${req?.reason || '-'}\n` +
+      `• *Metode:* Cash / Bayar di Tempat\n\n` +
+      `Jadwal jam ${order.time} WIB telah saya batalkan (> 1 jam sebelum sesi). Terima kasih.`
+    : `Halo Admin Griya Ayu, saya ingin mengajukan refund untuk pembatalan booking *#${invoiceCode}* ke nomor rekening *${req?.bankName || 'Bank/E-Wallet'} ${req?.accountNumber || '-'}* (a.n. *${req?.accountHolder || order.customer}*).\n\n` +
+      `*RINCIAN PEMBATALAN & REFUND:*\n` +
+      `----------------------------------------\n` +
+      `🧾 *ID Pesanan:* #${invoiceCode}\n` +
+      `👤 *Nama Pelanggan:* ${order.customer} (${order.wa})\n` +
+      `💆‍♀️ *Layanan:* ${order.items}\n` +
+      `📅 *Jadwal yang Dibatalkan:* ${order.datePretty} • Jam ${order.time} WIB\n` +
+      `💳 *Metode Pembayaran Awal:* ${order.payMethod}\n` +
+      `💰 *Nominal Refund:* ${formatRupiah(order.total)}\n` +
+      `🏦 *Tujuan Refund:* ${req?.bankName || '-'} - ${req?.accountNumber || '-'} (a.n. ${req?.accountHolder || order.customer})\n` +
+      `📝 *Alasan Pembatalan:* ${req?.reason || '-'}\n` +
+      `----------------------------------------\n` +
+      `Mohon dibantu proses pengembalian dananya ya Admin. Terima kasih! 🙏`;
 
   return `https://wa.me/6285183110392?text=${encodeURIComponent(text)}`;
 }
@@ -691,5 +693,314 @@ export function applyPointsCompletion(customer: User, pointsEarned: number): Use
     ...customer,
     points: customer.points + pointsEarned,
   };
+}
+
+// ============================================================================
+// SISTEM PENYIMPANAN LOCALSTORAGE PERSISTENCE & PROTEKSI DATA OMZET / ADMIN
+// ============================================================================
+
+export const STORAGE_KEYS = {
+  CUSTOMERS: 'griya_ayu_customers_live',
+  BOOKINGS: 'griya_ayu_bookings_live',
+  OMZET_LEDGER: 'griya_ayu_omzet_ledger_live',
+  NOTIFICATIONS: 'griya_ayu_notifications_live',
+  SLOTS: 'griya_ayu_slots_live',
+  CLOSED_WEEKDAYS: 'griya_ayu_closed_weekdays_live',
+  CLOSED_DATES: 'griya_ayu_closed_dates_live',
+  ADMIN_PROFILE: 'griya_ayu_admin_profile',
+  ACTIVE_SESSION: 'griya_ayu_active_session',
+  FONNTE_TOKEN: 'griya_ayu_fonnte_token_live',
+  LANG: 'griya_ayu_lang',
+} as const;
+
+export const DEFAULT_FONNTE_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
+
+export function getFonnteToken(): string {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEYS.FONNTE_TOKEN);
+    const cleaned = (saved || '').replace(/[[\]\s]/g, '').trim();
+    return cleaned || DEFAULT_FONNTE_TOKEN;
+  } catch {
+    return DEFAULT_FONNTE_TOKEN;
+  }
+}
+
+export function saveFonnteToken(token: string): string {
+  const cleaned = (token || '').replace(/[[\]\s]/g, '').trim() || DEFAULT_FONNTE_TOKEN;
+  try {
+    localStorage.setItem(STORAGE_KEYS.FONNTE_TOKEN, cleaned);
+  } catch {
+    // ignore
+  }
+  return cleaned;
+}
+
+/**
+ * Mengirim kode OTP 6 digit langsung ke WhatsApp pelanggan secara real-time melalui API Fonnte.
+ */
+export async function sendFonnteOtpWhatsApp(
+  targetPhone: string,
+  otpCode: string
+): Promise<{ ok: boolean; detail: string }> {
+  const token = getFonnteToken();
+  const cleanTarget = targetPhone.replace(/[^0-9]/g, '');
+  const message = `*GRIYA AYU SPA*\n\nKode OTP verifikasi Anda adalah: *${otpCode}*\nJangan berikan kode ini kepada siapa pun.`;
+
+  const formData = new FormData();
+  formData.append('target', cleanTarget);
+  formData.append('message', message);
+  formData.append('countryCode', '62');
+
+  const response = await fetch('https://api.fonnte.com/send', {
+    method: 'POST',
+    headers: {
+      Authorization: token,
+    },
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok || (data && data.status === false)) {
+    return {
+      ok: false,
+      detail:
+        data?.reason ||
+        data?.detail ||
+        'Gagal mengirim Kode OTP ke WhatsApp. Pastikan perangkat WhatsApp Fonnte terhubung.',
+    };
+  }
+
+  return {
+    ok: true,
+    detail: 'Kode OTP telah dikirim ke WhatsApp Anda!',
+  };
+}
+
+export function safeLoadJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function safeSaveJson<T>(key: string, value: T): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function normalizePhoneDigits(phone: string): string {
+  const digits = (phone || '').replace(/[^0-9]/g, '');
+  if (digits.startsWith('62')) {
+    return '0' + digits.slice(2);
+  }
+  return digits;
+}
+
+/**
+ * Memuat daftar akun pelanggan dari localStorage tanpa pernah mereset data yang sudah ada.
+ */
+export function loadCustomersPersistently(fallback: User[] = []): User[] {
+  const live = safeLoadJson<User[] | null>(STORAGE_KEYS.CUSTOMERS, null);
+  if (Array.isArray(live)) {
+    return live;
+  }
+  return fallback;
+}
+
+/**
+ * Menyimpan daftar akun pelanggan ke localStorage.
+ */
+export function saveCustomersPersistently(customers: User[]): void {
+  safeSaveJson(STORAGE_KEYS.CUSTOMERS, customers);
+}
+
+/**
+ * Memuat riwayat booking & menggabungkannya dengan cadangan buku besar omzet (omzet ledger)
+ * agar data transaksi terverifikasi (omzet harian & bulanan) tidak pernah hilang.
+ */
+export function loadBookingsPersistently(fallback: BookingOrder[] = []): BookingOrder[] {
+  const mainList = safeLoadJson<BookingOrder[] | null>(STORAGE_KEYS.BOOKINGS, null);
+  const ledgerList = safeLoadJson<BookingOrder[] | null>(STORAGE_KEYS.OMZET_LEDGER, null);
+
+  const base: BookingOrder[] = Array.isArray(mainList) ? mainList : fallback;
+  const ledger: BookingOrder[] = Array.isArray(ledgerList) ? ledgerList : [];
+
+  if (ledger.length === 0) {
+    return base;
+  }
+
+  // Pastikan setiap transaksi terverifikasi di buku besar omzet tetap ada dan terjaga status verifikasinya
+  const mapById = new Map<number, BookingOrder>();
+  base.forEach((b) => {
+    if (b && typeof b.id === 'number') {
+      mapById.set(b.id, b);
+    }
+  });
+
+  ledger.forEach((ledgerOrder) => {
+    if (!ledgerOrder || typeof ledgerOrder.id !== 'number') return;
+    const existing = mapById.get(ledgerOrder.id);
+    if (!existing) {
+      mapById.set(ledgerOrder.id, ledgerOrder);
+    } else if (!isVerifiedRevenueOrder(existing) && isVerifiedRevenueOrder(ledgerOrder)) {
+      // Jika karena alasan tertentu status verifikasi di mainList belum terupdate sementara di ledger sudah terverifikasi (dan bukan refund)
+      if (
+        existing.status !== 'Refund_Requested' &&
+        existing.status !== 'Refund_Completed' &&
+        existing.status !== 'Cancelled'
+      ) {
+        mapById.set(ledgerOrder.id, {
+          ...existing,
+          status: ledgerOrder.status,
+          paymentStatus: ledgerOrder.paymentStatus,
+          verifiedDateIso: ledgerOrder.verifiedDateIso || existing.verifiedDateIso,
+        });
+      }
+    }
+  });
+
+  return Array.from(mapById.values()).sort((a, b) => b.id - a.id);
+}
+
+/**
+ * Menyimpan seluruh data booking sekaligus membackup transaksi terverifikasi (Omzet Harian & Bulanan)
+ * ke buku besar khusus tanpa gambar berat agar 100% aman dari batas kuota memori browser.
+ */
+export function saveBookingsPersistently(bookings: BookingOrder[]): void {
+  // 1. Amankan data Omzet Harian & Bulanan terlebih dahulu ke buku besar ringan (tanpa base64 foto)
+  const verifiedLedger: BookingOrder[] = bookings
+    .filter((b) => isVerifiedRevenueOrder(b))
+    .map((b) => ({
+      ...b,
+      paymentProofImage: undefined,
+      refundRequest: b.refundRequest
+        ? { ...b.refundRequest, proofImage: undefined }
+        : undefined,
+    }));
+  safeSaveJson(STORAGE_KEYS.OMZET_LEDGER, verifiedLedger);
+
+  // 2. Simpan data booking lengkap beserta foto bukti transfer
+  const savedFull = safeSaveJson(STORAGE_KEYS.BOOKINGS, bookings);
+  if (savedFull) return;
+
+  // 3. Fallback jika memori localStorage penuh (QuotaExceededError akibat banyak foto resolusi tinggi):
+  //    Kompres/hapus base64 foto dari pesanan lama yang sudah selesai/dibatalkan terlebih dahulu,
+  //    sehingga riwayat pesanan, status pembayaran, dan angka omzet TIDAK PERNAH GAGAL TERSIMPAN.
+  const trimmedOldCompleted = bookings.map((b, idx) => {
+    const isOldDone =
+      idx >= 5 &&
+      (b.status === 'Completed' ||
+        b.status === 'Verified' ||
+        b.status === 'Refund_Completed' ||
+        b.status === 'Cancelled');
+    if (!isOldDone) return b;
+    return {
+      ...b,
+      paymentProofImage: undefined,
+      refundRequest: b.refundRequest
+        ? { ...b.refundRequest, proofImage: undefined }
+        : undefined,
+    };
+  });
+
+  if (safeSaveJson(STORAGE_KEYS.BOOKINGS, trimmedOldCompleted)) return;
+
+  // 4. Fallback terakhir: simpan seluruh teks transaksi & omzet tanpa gambar base64
+  const lightBookings = bookings.map((b) => ({
+    ...b,
+    paymentProofImage: undefined,
+    refundRequest: b.refundRequest
+      ? { ...b.refundRequest, proofImage: undefined }
+      : undefined,
+  }));
+  safeSaveJson(STORAGE_KEYS.BOOKINGS, lightBookings);
+}
+
+export interface PersistedSession {
+  user: User;
+  isAdmin: boolean;
+}
+
+export function loadActiveSession(): PersistedSession | null {
+  const session = safeLoadJson<PersistedSession | null>(STORAGE_KEYS.ACTIVE_SESSION, null);
+  if (!session || !session.user || !session.user.phone) return null;
+  return session;
+}
+
+export function saveActiveSession(user: User, isAdmin: boolean): void {
+  safeSaveJson(STORAGE_KEYS.ACTIVE_SESSION, { user, isAdmin });
+}
+
+export function clearActiveSession(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Mengompres file foto bukti transfer / QRIS menjadi ukuran ringan (maks 800px, JPEG 0.72)
+ * agar puluhan/ratusan foto bukti tetap muat di localStorage tanpa pernah error kuota penuh.
+ */
+export function compressImageFileToDataUrl(
+  file: File,
+  maxDimension: number = 800,
+  quality: number = 0.72
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca file gambar'));
+    reader.onload = () => {
+      const resultStr = typeof reader.result === 'string' ? reader.result : '';
+      if (!resultStr) {
+        reject(new Error('File gambar kosong'));
+        return;
+      }
+
+      const img = new Image();
+      img.onerror = () => {
+        // Jika gagal decode di canvas, kembalikan data URL asli
+        resolve(resultStr);
+      };
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          if (width > maxDimension || height > maxDimension) {
+            if (width >= height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(resultStr);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed.length < resultStr.length ? compressed : resultStr);
+        } catch {
+          resolve(resultStr);
+        }
+      };
+      img.src = resultStr;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 

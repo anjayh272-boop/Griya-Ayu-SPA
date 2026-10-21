@@ -22,6 +22,7 @@ import {
   isOrderLockedStatus,
   getPaymentMethodDetails,
   checkBookingRefundEligibility,
+  compressImageFileToDataUrl,
   buildCustomerBookingWaToAdminMessage,
   buildCustomerToAdminRefundWaMessage,
   GRIYA_AYU_QRIS_IMAGE,
@@ -144,17 +145,23 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [step3ProofImage, setStep3ProofImage] = useState<string>('');
   const [step3ProofError, setStep3ProofError] = useState<string>('');
 
-  const handleStep3ProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStep3ProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setStep3ProofImage(reader.result);
-        setStep3ProofError('');
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      setStep3ProofImage(compressed);
+      setStep3ProofError('');
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setStep3ProofImage(reader.result);
+          setStep3ProofError('');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   // State Modal Formulir Pengajuan Pembatalan / Refund
@@ -168,25 +175,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   const handleOpenRefundModal = (order: BookingOrder) => {
     setRefundModalOrder(order);
-    setRefundReason('');
-    setRefundBankName('Bank BCA');
-    setRefundAccountNumber('');
-    setRefundAccountHolder(order.customer);
-    setRefundProofImage(order.paymentProofImage || '');
+    setRefundReason(order.refundRequest?.reason || 'Ada keperluan mendadak');
+    setRefundBankName(order.refundRequest?.bankName || 'Bank BCA');
+    setRefundAccountNumber(order.refundRequest?.accountNumber || '');
+    setRefundAccountHolder(order.refundRequest?.accountHolder || order.customer);
+    setRefundProofImage(order.refundRequest?.proofImage || order.paymentProofImage || '');
     setRefundFormError('');
   };
 
-  const handleRefundProofUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleRefundProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setRefundProofImage(reader.result);
-        setRefundFormError('');
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      setRefundProofImage(compressed);
+      setRefundFormError('');
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setRefundProofImage(reader.result);
+          setRefundFormError('');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSubmitRefundForm = (e: React.FormEvent) => {
@@ -196,7 +209,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     const isCashOrder =
       refundModalOrder.payMethodType === 'cash' ||
       refundModalOrder.payMethod.toLowerCase().includes('cash') ||
-      refundModalOrder.payMethod.toLowerCase().includes('tempat');
+      refundModalOrder.payMethod.toLowerCase().includes('tempat') ||
+      refundModalOrder.paymentStatus === 'Pending';
 
     if (!refundReason.trim()) {
       setRefundFormError('Mohon isi alasan pembatalan jadwal terlebih dahulu.');
@@ -206,13 +220,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     if (!isCashOrder) {
       if (!refundBankName.trim() || !refundAccountNumber.trim() || !refundAccountHolder.trim()) {
         setRefundFormError(
-          'Mohon lengkapi Nama Bank/E-Wallet, Nomor Rekening, dan Atas Nama tujuan pengembalian dana.'
-        );
-        return;
-      }
-      if (!refundProofImage) {
-        setRefundFormError(
-          'Mohon upload foto / screenshot bukti pembayaran awal (QRIS / Transfer) untuk diverifikasi Admin.'
+          'Mohon lengkapi Nama Bank/E-Wallet, Nomor Rekening, dan Atas Nama tujuan pengembalian dana (refund).'
         );
         return;
       }
@@ -231,7 +239,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       bankName: isCashOrder ? undefined : refundBankName.trim(),
       accountNumber: isCashOrder ? undefined : refundAccountNumber.trim(),
       accountHolder: isCashOrder ? undefined : refundAccountHolder.trim(),
-      proofImage: isCashOrder ? undefined : refundProofImage,
+      proofImage: isCashOrder
+        ? undefined
+        : refundProofImage || refundModalOrder.paymentProofImage || undefined,
       requestedAt: nowStr,
       isCashCancellation: isCashOrder,
     };
@@ -1987,9 +1997,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                               <span>MENUNGGU CEK REFUND ADMIN</span>
                             </span>
                           ) : isRefundDone ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-stone-200 text-stone-700 border border-stone-300 inline-flex items-center gap-1">
-                              <i className="fa-solid fa-ban text-stone-600"></i>
-                              <span>REFUND SELESAI / DIBATALKAN</span>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400 inline-flex items-center gap-1">
+                              <i className="fa-solid fa-circle-check text-emerald-700"></i>
+                              <span>
+                                {b.status === 'Refund_Completed'
+                                  ? 'REFUND SELESAI • Jadwal Tidak Terkunci'
+                                  : 'DIBATALKAN • Jadwal Tidak Terkunci'}
+                              </span>
                             </span>
                           ) : isConfirmedAcc ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
@@ -2052,60 +2066,85 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </div>
                     )}
 
-                    {/* Box Status Menunggu Cek Refund Admin + Tombol WA Admin */}
+                    {/* Box Status Menunggu Cek Refund Admin + Tombol Pintasan WA Otomatis ke Admin */}
                     {isRefundWaiting && b.refundRequest && (
                       <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3 space-y-2 text-xs">
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center gap-2 flex-wrap">
                           <span className="font-black text-amber-950 text-[11px] flex items-center gap-1.5">
                             <i className="fa-solid fa-hourglass-half text-amber-600"></i>
-                            <span>Detail Pengajuan Pembatalan / Refund:</span>
+                            <span>Pesanan Dibatalkan • Menunggu ACC Refund Admin</span>
                           </span>
-                          <span className="text-[10px] font-bold text-amber-800">
-                            {b.refundRequest.requestedAt}
+                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded-full">
+                            🔓 Jadwal {b.time} WIB Sudah Tidak Terkunci
                           </span>
                         </div>
                         <div className="bg-white/90 p-2.5 rounded-xl border border-amber-200 space-y-1 text-[11px] text-stone-700">
                           <p>
-                            <b>Alasan Batal:</b> {b.refundRequest.reason}
+                            <b>ID Booking:</b> #GA-{String(b.id).slice(-6)}
+                          </p>
+                          <p>
+                            <b>Alasan Pembatalan:</b> {b.refundRequest.reason}
                           </p>
                           {!b.refundRequest.isCashCancellation && b.refundRequest.bankName && (
                             <p>
-                              <b>Tujuan Refund:</b> {b.refundRequest.bankName} •{' '}
-                              <span className="font-mono font-bold">
+                              <b>Rekening Tujuan Refund:</b> {b.refundRequest.bankName} •{' '}
+                              <span className="font-mono font-bold text-[#0B261C]">
                                 {b.refundRequest.accountNumber}
                               </span>{' '}
                               (a.n. {b.refundRequest.accountHolder})
                             </p>
                           )}
                         </div>
-                        <a
-                          href={buildCustomerToAdminRefundWaMessage(b)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="tactile-btn w-full min-h-[42px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs"
-                        >
-                          <i className="fa-brands fa-whatsapp text-base"></i>
-                          <span>Kirim Notifikasi Pengajuan Refund ke WhatsApp Admin</span>
-                        </a>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <a
+                            href={buildCustomerToAdminRefundWaMessage(b)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="tactile-btn flex-1 min-h-[42px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs"
+                          >
+                            <i className="fa-brands fa-whatsapp text-base"></i>
+                            <span>Kirim Permintaan Refund ke WhatsApp Admin</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenRefundModal(b)}
+                            className="tactile-btn bg-white hover:bg-stone-100 text-stone-700 border border-amber-300 font-bold py-2 px-3 rounded-xl text-[11px]"
+                          >
+                            Ubah No. Rekening
+                          </button>
+                        </div>
                       </div>
                     )}
 
                     {/* Box Status Refund Selesai / Dibatalkan */}
                     {isRefundDone && (
-                      <div className="bg-stone-100 border border-stone-200 rounded-xl p-2.5 text-[11px] text-stone-600 flex items-center justify-between gap-2">
-                        <span>
-                          <i className="fa-solid fa-circle-check text-emerald-700 mr-1.5"></i>
-                          Jadwal telah dibatalkan & dana refund telah diproses oleh Admin.
-                        </span>
-                        {b.refundRequest?.processedAt && (
-                          <span className="text-[10px] font-bold text-stone-500 whitespace-nowrap">
-                            {b.refundRequest.processedAt}
+                      <div className="bg-stone-100 border border-stone-200 rounded-xl p-2.5 text-[11px] text-stone-700 space-y-1">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="font-bold text-emerald-900">
+                            <i className="fa-solid fa-circle-check text-emerald-700 mr-1.5"></i>
+                            {b.status === 'Refund_Completed'
+                              ? 'Refund Selesai (Dana telah ditransfer Admin & jadwal kembali tidak terkunci).'
+                              : 'Booking telah dibatalkan & jadwal kembali tidak terkunci.'}
                           </span>
+                          {b.refundRequest?.processedAt && (
+                            <span className="text-[10px] font-bold text-stone-500 whitespace-nowrap">
+                              {b.refundRequest.processedAt}
+                            </span>
+                          )}
+                        </div>
+                        {b.refundRequest?.accountNumber && (
+                          <p className="text-[10px] text-stone-500">
+                            Rekening Tujuan: <b>{b.refundRequest.bankName}</b> •{' '}
+                            <span className="font-mono font-bold">
+                              {b.refundRequest.accountNumber}
+                            </span>{' '}
+                            (a.n. {b.refundRequest.accountHolder})
+                          </p>
                         )}
                       </div>
                     )}
 
-                    {/* Baris Tombol Utama: Kirim Bukti Booking ke WA Admin, Lihat Struk & Ajukan Pembatalan / Refund */}
+                    {/* Baris Tombol Utama: Kirim Bukti Booking ke WA Admin, Lihat Struk & Batalkan / Ajukan Refund */}
                     <div className="space-y-2 pt-2 border-t border-stone-100">
                       {isPaid && !isRefundWaiting && !isRefundDone && (
                         <a
@@ -2137,7 +2176,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           </span>
                         </button>
 
-                        {/* Tombol Ajukan Pembatalan / Refund pada Setiap Pesanan Aktif */}
+                        {/* Tombol Batalkan Booking / Ajukan Refund pada Setiap Pesanan Aktif */}
                         {isActiveBooking && (
                           <button
                             type="button"
@@ -2158,7 +2197,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 refundEligibility.canRefund ? 'fa-rotate-left' : 'fa-lock'
                               }`}
                             ></i>
-                            <span>Ajukan Pembatalan / Refund</span>
+                            <span>
+                              {b.payMethodType === 'cash' ||
+                              b.payMethod.toLowerCase().includes('cash') ||
+                              b.paymentStatus === 'Pending'
+                                ? 'Batalkan Booking'
+                                : 'Batalkan & Ajukan Refund'}
+                            </span>
                           </button>
                         )}
                       </div>
@@ -2382,19 +2427,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* 3. Upload Foto Bukti Pembayaran Awal (Screenshot TF/QRIS) */}
+                  {/* 3. Lampiran Bukti Pembayaran Awal (Otomatis Terlampir / Opsional) */}
                   <div className="bg-white p-3.5 rounded-2xl border border-stone-200/90 space-y-2.5 shadow-xs">
                     <div className="flex justify-between items-center">
                       <span className="text-xs font-black text-[#0B261C]">
-                        3. Upload Bukti Pembayaran Awal <span className="text-red-600">*</span>
+                        3. Bukti Pembayaran Awal (Opsional)
                       </span>
                       <span className="text-[10px] font-bold text-emerald-800">
-                        Screenshot QRIS / TF
+                        {refundProofImage ? '✓ Otomatis Terlampir' : 'Screenshot QRIS / TF'}
                       </span>
                     </div>
                     <p className="text-[11px] text-stone-500 leading-relaxed">
-                      Unggah foto / screenshot bukti transaksi QRIS atau Transfer Bank awal untuk
-                      diverifikasi oleh Admin Ibu Kartini / Rismawati.
+                      Bukti transaksi saat booking otomatis dilampirkan. Anda juga dapat mengunggah ulang screenshot jika diperlukan.
                     </p>
 
                     <input

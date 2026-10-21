@@ -16,6 +16,8 @@ import {
   isTodayRevenueOrder,
   isMonthRevenueOrder,
   downloadMonthlyRevenueCsv,
+  loadCustomersPersistently,
+  compressImageFileToDataUrl,
   buildAdminWaConfirmationMessage,
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
@@ -166,15 +168,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const storedCustomers: User[] = React.useMemo(() => {
-    const saved = localStorage.getItem('griya_ayu_customers_live');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return INITIAL_USERS;
-      }
-    }
-    return INITIAL_USERS;
+    return loadCustomersPersistently(INITIAL_USERS);
   }, [adminSubTab, bookings.length]);
 
   const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -196,16 +190,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handlePromoImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePromoImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setPromoImage(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      setPromoImage(compressed);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setPromoImage(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleSelectPromoPreset = (preset: (typeof PROMO_TEMPLATES)[0]) => {
@@ -440,16 +439,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     : 'text-stone-600 hover:text-stone-900'
                 }`}
               >
-                Dibatalkan
+                Batal / Refund
               </button>
             </div>
 
             <div className="flex justify-between items-center px-1">
               <h2 className="text-[11px] font-black uppercase tracking-wider text-stone-700">
-                Kelola Pesanan & Verifikasi Refund
+                Kelola Pesanan & Pengelolaan Refund
               </h2>
               <span className="text-[10px] font-bold text-emerald-800">
-                Setujui Refund = Jam Buka Kembali
+                Batal / Refund = Jam Terbuka Kembali
               </span>
             </div>
 
@@ -518,9 +517,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span>MENUNGGU CEK REFUND ADMIN</span>
                           </span>
                         ) : isRefundDone ? (
-                          <span className="text-[9px] font-black bg-stone-200 text-stone-700 border border-stone-300 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
-                            <i className="fa-solid fa-ban text-stone-600"></i>
-                            <span>REFUND SELESAI / DIBATALKAN</span>
+                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-400 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
+                            <i className="fa-solid fa-circle-check text-emerald-700"></i>
+                            <span>
+                              {b.status === 'Refund_Completed' ? 'REFUND SELESAI' : 'DIBATALKAN'}
+                            </span>
                           </span>
                         ) : isConfirmedAcc ? (
                           <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-500 px-2.5 py-1 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
@@ -729,7 +730,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {/* 2 Tombol Aksi untuk Admin jika status masih Menunggu Cek Refund Admin */}
                         {isRefundWaiting && (
                           <div className="space-y-2 pt-1">
-                            {/* Tombol 1: Setujui Refund & Buka Kembali Jam */}
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-2.5 py-1.5 text-[10px] font-bold text-emerald-900 flex items-center gap-1.5">
+                              <i className="fa-solid fa-lock-open text-emerald-700"></i>
+                              <span>
+                                Jadwal Jam <b>{b.time} WIB</b> sudah otomatis kembali tidak terkunci.
+                                Silakan transfer dana refund ke rekening pelanggan di atas, lalu klik
+                                tombol ACC di bawah:
+                              </span>
+                            </div>
+
+                            {/* Tombol 1: ACC Permintaan Refund & Ubah ke Refund Selesai */}
                             <a
                               href={approveRefundWa.url}
                               target="_blank"
@@ -737,8 +747,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               onClick={() => onApproveRefund(b.id)}
                               className="tactile-btn gold-shimmer-card w-full min-h-[42px] bg-gradient-to-r from-[#0B261C] via-emerald-900 to-[#0B261C] text-[#D4AF37] font-black py-2.5 px-3 rounded-xl text-[11px] border border-[#D4AF37] shadow-sm flex items-center justify-center gap-1.5 text-center"
                             >
-                              <i className="fa-solid fa-unlock-keyhole text-amber-300"></i>
-                              <span>Setujui Refund & Buka Kembali Jam (+Kirim WA)</span>
+                              <i className="fa-solid fa-circle-check text-amber-300"></i>
+                              <span>ACC Refund & Ubah Status ke "Refund Selesai" (+Kirim WA)</span>
                             </a>
 
                             {/* Tombol 2: Tolak Refund */}
@@ -790,16 +800,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 className="tactile-btn w-full bg-red-50 hover:bg-red-100 text-red-800 border border-red-300 font-black py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5"
                               >
                                 <i className="fa-solid fa-ban"></i>
-                                <span>Tolak Refund (Kembalikan Status / Bukti Tidak Valid)</span>
+                                <span>Tolak Refund (Kembalikan Status Aktif)</span>
                               </button>
                             )}
                           </div>
                         )}
 
                         {isRefundDone && (
-                          <div className="flex items-center justify-between gap-2 pt-1">
+                          <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                             <span className="text-[10px] font-bold text-emerald-800">
-                              ✓ Slot jam {b.time} WIB telah dibuka kembali & poin dibatalkan
+                              ✓ Status: Refund Selesai • Jadwal Jam {b.time} WIB tidak terkunci
                             </span>
                             <a
                               href={approveRefundWa.url}
@@ -807,7 +817,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               rel="noopener noreferrer"
                               className="tactile-btn bg-[#25D366] text-white font-black px-2.5 py-1.5 rounded-xl text-[10px] flex items-center gap-1"
                             >
-                              <i className="fa-brands fa-whatsapp"></i> Kirim WA Refund
+                              <i className="fa-brands fa-whatsapp"></i> Kirim WA Refund Selesai
                             </a>
                           </div>
                         )}

@@ -4,6 +4,7 @@ import {
   formatRupiah,
   formatCountdown,
   isOrderLockedStatus,
+  compressImageFileToDataUrl,
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_QRIS_MERCHANT,
@@ -82,17 +83,23 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     onChangeMethodType(order.id, nextType);
   };
 
-  const handleUploadProof = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setProofImage(reader.result);
-        setProofError('');
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      setProofImage(compressed);
+      setProofError('');
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setProofImage(reader.result);
+          setProofError('');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleConfirmPaid = () => {

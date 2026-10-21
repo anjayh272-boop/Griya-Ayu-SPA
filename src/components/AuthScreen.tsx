@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { User } from '../types/index.ts';
 import { INITIAL_USERS } from '../data/mockData.ts';
+import {
+  loadCustomersPersistently,
+  saveCustomersPersistently,
+  safeLoadJson,
+  STORAGE_KEYS,
+} from '../utils/spaLogic.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
 interface AuthScreenProps {
@@ -30,16 +36,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
   const getStoredCustomers = (): User[] => {
-    const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
-    if (savedUsersStr) {
-      try {
-        return JSON.parse(savedUsersStr);
-      } catch {
-        return INITIAL_USERS;
-      }
-    }
-    localStorage.setItem('griya_ayu_customers_live', JSON.stringify(INITIAL_USERS));
-    return INITIAL_USERS;
+    return loadCustomersPersistently(INITIAL_USERS);
   };
 
   const normalizePhone = (phone: string): string => {
@@ -64,8 +61,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     // Cek Akun Admin Utama: 085183110392 // RISMAWATI (maupun Ibu Kartini)
-    const savedAdminStr = localStorage.getItem('griya_ayu_admin_profile');
-    const savedAdmin: User | null = savedAdminStr ? JSON.parse(savedAdminStr) : null;
+    const savedAdmin: User | null = safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
     const expectedAdminPass = savedAdmin?.pass || 'RISMAWATI';
 
     const isMainAdmin =
@@ -194,7 +190,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     };
 
     const updatedList = [...usersList, newCustomer];
-    localStorage.setItem('griya_ayu_customers_live', JSON.stringify(updatedList));
+    saveCustomersPersistently(updatedList);
 
     onRegisterSuccess(newCustomer);
   };

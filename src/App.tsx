@@ -28,6 +28,17 @@ import {
   buildCustomerToAdminRefundWaMessage,
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
+  STORAGE_KEYS,
+  safeLoadJson,
+  safeSaveJson,
+  normalizePhoneDigits,
+  loadCustomersPersistently,
+  saveCustomersPersistently,
+  loadBookingsPersistently,
+  saveBookingsPersistently,
+  loadActiveSession,
+  saveActiveSession,
+  clearActiveSession,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
 } from './utils/spaLogic.ts';
@@ -40,46 +51,61 @@ import { CustomerDashboard } from './components/CustomerDashboard.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
 
 export default function App() {
-  // Bersihkan cache data uji coba lama di browser agar aplikasi mulai 100% bersih (kecuali Admin)
-  useEffect(() => {
-    localStorage.removeItem('griya_ayu_bookings_v2');
-    localStorage.removeItem('griya_ayu_notifications_v3');
-    localStorage.removeItem('griya_ayu_customers');
-    localStorage.removeItem('griya_ayu_slots');
-    if (!localStorage.getItem('griya_ayu_customers_live')) {
-      localStorage.setItem('griya_ayu_customers_live', JSON.stringify(INITIAL_USERS));
-    }
-  }, []);
-
   // Language State ('id' | 'en')
   const [language, setLanguage] = useState<Language>(() => {
-    const saved = localStorage.getItem('griya_ayu_lang');
+    const saved = localStorage.getItem(STORAGE_KEYS.LANG);
     return saved === 'en' ? 'en' : 'id';
   });
 
-  // Tampilan awal adalah Login ('auth')
-  const [activeScreen, setActiveScreen] = useState<'auth' | 'app'>('auth');
+  // Daftar pelanggan terdaftar disimpan secara persisten di localStorage
+  const [customers, setCustomers] = useState<User[]>(() =>
+    loadCustomersPersistently(INITIAL_USERS)
+  );
 
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
-
-  const [bookings, setBookings] = useState<BookingOrder[]>(() => {
-    const saved = localStorage.getItem('griya_ayu_bookings_live');
-    return saved ? JSON.parse(saved) : INITIAL_BOOKINGS;
+  // Pulihkan sesi login terakhir (Pelanggan maupun Admin) agar saat di-refresh tidak keluar
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const session = loadActiveSession();
+    if (!session) return null;
+    if (session.isAdmin) {
+      const savedAdmin = safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
+      return savedAdmin || session.user;
+    }
+    const storedList = loadCustomersPersistently(INITIAL_USERS);
+    const matched = storedList.find(
+      (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(session.user.phone)
+    );
+    return matched || session.user;
   });
 
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    const saved = localStorage.getItem('griya_ayu_notifications_live');
-    return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    const session = loadActiveSession();
+    return Boolean(session?.isAdmin);
   });
 
-  const [masterTimeSlots, setMasterTimeSlots] = useState<TimeSlot[]>(() => {
-    const saved = localStorage.getItem('griya_ayu_slots_live');
-    return saved ? JSON.parse(saved) : INITIAL_TIME_SLOTS;
+  const [activeScreen, setActiveScreen] = useState<'auth' | 'app'>(() => {
+    const session = loadActiveSession();
+    return session ? 'app' : 'auth';
   });
 
-  const [closedWeekdays, setClosedWeekdays] = useState<number[]>([0]); // Minggu libur rutin
-  const [closedSpecificDates, setClosedSpecificDates] = useState<string[]>([]);
+  // Riwayat Booking & Data Omzet Harian/Bulanan dipulihkan dari localStorage + Buku Besar Omzet
+  const [bookings, setBookings] = useState<BookingOrder[]>(() =>
+    loadBookingsPersistently(INITIAL_BOOKINGS)
+  );
+
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    safeLoadJson<AppNotification[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS)
+  );
+
+  const [masterTimeSlots, setMasterTimeSlots] = useState<TimeSlot[]>(() =>
+    safeLoadJson<TimeSlot[]>(STORAGE_KEYS.SLOTS, INITIAL_TIME_SLOTS)
+  );
+
+  const [closedWeekdays, setClosedWeekdays] = useState<number[]>(() =>
+    safeLoadJson<number[]>(STORAGE_KEYS.CLOSED_WEEKDAYS, [0])
+  );
+  const [closedSpecificDates, setClosedSpecificDates] = useState<string[]>(() =>
+    safeLoadJson<string[]>(STORAGE_KEYS.CLOSED_DATES, [])
+  );
 
   // Modals & Popups
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -111,20 +137,53 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_lang', language);
+    try {
+      localStorage.setItem(STORAGE_KEYS.LANG, language);
+    } catch {
+      // ignore
+    }
   }, [language]);
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_bookings_live', JSON.stringify(bookings));
+    saveCustomersPersistently(customers);
+  }, [customers]);
+
+  useEffect(() => {
+    saveBookingsPersistently(bookings);
   }, [bookings]);
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_notifications_live', JSON.stringify(notifications));
+    safeSaveJson(STORAGE_KEYS.NOTIFICATIONS, notifications);
   }, [notifications]);
 
   useEffect(() => {
-    localStorage.setItem('griya_ayu_slots_live', JSON.stringify(masterTimeSlots));
+    safeSaveJson(STORAGE_KEYS.SLOTS, masterTimeSlots);
   }, [masterTimeSlots]);
+
+  useEffect(() => {
+    safeSaveJson(STORAGE_KEYS.CLOSED_WEEKDAYS, closedWeekdays);
+  }, [closedWeekdays]);
+
+  useEffect(() => {
+    safeSaveJson(STORAGE_KEYS.CLOSED_DATES, closedSpecificDates);
+  }, [closedSpecificDates]);
+
+  useEffect(() => {
+    if (currentUser && activeScreen === 'app') {
+      saveActiveSession(currentUser, isAdmin);
+    }
+  }, [currentUser, isAdmin, activeScreen]);
+
+  // Helper update bookings & langsung amankan ke localStorage secara sinkron
+  const updateBookingsAndPersist = (
+    updater: (prev: BookingOrder[]) => BookingOrder[]
+  ) => {
+    setBookings((prev) => {
+      const next = updater(prev);
+      saveBookingsPersistently(next);
+      return next;
+    });
+  };
 
   // Helper trigger celebration
   const triggerCelebration = (text: string) => {
@@ -152,21 +211,44 @@ export default function App() {
 
   // Auth Handlers
   const handleLoginSuccess = (user: User, adminStatus: boolean) => {
-    setCurrentUser(user);
-    setIsAdmin(adminStatus);
-    setActiveScreen('app');
-
-    if (adminStatus) {
-      triggerCelebration('Mode Admin Aktif');
-    } else {
-      triggerCelebration(`${user.points} Poin Member`);
+    if (!adminStatus) {
+      const latestStored = loadCustomersPersistently(customers);
+      const found = latestStored.find(
+        (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(user.phone)
+      );
+      const resolvedUser = found || user;
+      setCurrentUser(resolvedUser);
+      setIsAdmin(false);
+      setActiveScreen('app');
+      saveActiveSession(resolvedUser, false);
+      triggerCelebration(`${resolvedUser.points} Poin Member`);
+      return;
     }
+
+    setCurrentUser(user);
+    setIsAdmin(true);
+    setActiveScreen('app');
+    saveActiveSession(user, true);
+    triggerCelebration('Mode Admin Aktif');
   };
 
   const handleRegisterSuccess = (user: User) => {
+    setCustomers((prev) => {
+      const exists = prev.some(
+        (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(user.phone)
+      );
+      const next = exists
+        ? prev.map((u) =>
+            normalizePhoneDigits(u.phone) === normalizePhoneDigits(user.phone) ? user : u
+          )
+        : [...prev, user];
+      saveCustomersPersistently(next);
+      return next;
+    });
     setCurrentUser(user);
     setIsAdmin(false);
     setActiveScreen('app');
+    saveActiveSession(user, false);
     triggerCelebration('Bonus +20 Poin!');
     showToast(
       'Pendaftaran Berhasil! 🎉',
@@ -176,23 +258,27 @@ export default function App() {
 
   const handleUpdateUser = (updatedUser: User) => {
     setCurrentUser(updatedUser);
+    saveActiveSession(updatedUser, isAdmin);
 
     if (isAdmin) {
-      localStorage.setItem('griya_ayu_admin_profile', JSON.stringify(updatedUser));
+      safeSaveJson(STORAGE_KEYS.ADMIN_PROFILE, updatedUser);
     } else {
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
-      if (savedUsersStr) {
-        const list: User[] = JSON.parse(savedUsersStr);
-        const idx = list.findIndex((u) => u.phone === updatedUser.phone);
-        if (idx !== -1) {
-          list[idx] = updatedUser;
-          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
-        }
-      }
+      setCustomers((prev) => {
+        const idx = prev.findIndex(
+          (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(updatedUser.phone)
+        );
+        const next =
+          idx !== -1
+            ? prev.map((u, i) => (i === idx ? updatedUser : u))
+            : [...prev, updatedUser];
+        saveCustomersPersistently(next);
+        return next;
+      });
     }
   };
 
   const handleLogout = () => {
+    clearActiveSession();
     setCurrentUser(null);
     setIsAdmin(false);
     setActiveScreen('auth');
@@ -241,7 +327,7 @@ export default function App() {
       createdAt: nowFormatted(),
     };
 
-    setBookings((prev) => [newPendingBooking, ...prev]);
+    updateBookingsAndPersist((prev) => [newPendingBooking, ...prev]);
     setActivePaymentOrderId(newOrderId);
     setPaymentModalOpen(true);
   };
@@ -271,16 +357,17 @@ export default function App() {
         points: Math.max(0, currentUser.points - draft.pointsRedeemedCost),
       };
       setCurrentUser(updatedUser);
+      saveActiveSession(updatedUser, isAdmin);
 
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
-      if (savedUsersStr) {
-        const list: User[] = JSON.parse(savedUsersStr);
-        const idx = list.findIndex((u) => u.phone === currentUser.phone);
-        if (idx !== -1) {
-          list[idx].points = updatedUser.points;
-          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
-        }
-      }
+      setCustomers((prev) => {
+        const next = prev.map((u) =>
+          normalizePhoneDigits(u.phone) === normalizePhoneDigits(currentUser.phone)
+            ? { ...u, points: updatedUser.points }
+            : u
+        );
+        saveCustomersPersistently(next);
+        return next;
+      });
     }
 
     const resolvedPaymentStatus: BookingOrder['paymentStatus'] = !draft.markAsPaid
@@ -310,7 +397,7 @@ export default function App() {
       paymentProofImage: draft.paymentProofImage,
     };
 
-    setBookings((prev) => [newBooking, ...prev]);
+    updateBookingsAndPersist((prev) => [newBooking, ...prev]);
 
     if (draft.markAsPaid) {
       const waConfirm = buildAdminWaConfirmationMessage(newBooking);
@@ -382,7 +469,7 @@ export default function App() {
 
   // Ubah metode pembayaran (QRIS vs Transfer Bank vs Cash)
   const handleChangeMethodType = (orderId: number, methodType: PaymentMethodType) => {
-    setBookings((prev) =>
+    updateBookingsAndPersist((prev) =>
       prev.map((b) => {
         if (b.id !== orderId) return b;
         const details = getPaymentMethodDetails(methodType, b.wa);
@@ -418,7 +505,7 @@ export default function App() {
 
   // Jika Pembayaran Gagal
   const handlePaymentFailed = (orderId: number, methodType: PaymentMethodType) => {
-    setBookings((prev) =>
+    updateBookingsAndPersist((prev) =>
       prev.map((b) => {
         if (b.id !== orderId) return b;
         const details = getPaymentMethodDetails(methodType, b.wa);
@@ -452,16 +539,17 @@ export default function App() {
         points: Math.max(0, currentUser.points - targetOrder.ptsRedeemedCost),
       };
       setCurrentUser(updatedUser);
+      saveActiveSession(updatedUser, isAdmin);
 
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
-      if (savedUsersStr) {
-        const list: User[] = JSON.parse(savedUsersStr);
-        const idx = list.findIndex((u) => u.phone === currentUser.phone);
-        if (idx !== -1) {
-          list[idx].points = updatedUser.points;
-          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
-        }
-      }
+      setCustomers((prev) => {
+        const next = prev.map((u) =>
+          normalizePhoneDigits(u.phone) === normalizePhoneDigits(currentUser.phone)
+            ? { ...u, points: updatedUser.points }
+            : u
+        );
+        saveCustomersPersistently(next);
+        return next;
+      });
     }
 
     const resolvedStatus: BookingOrder['paymentStatus'] = isCash
@@ -478,7 +566,7 @@ export default function App() {
       paymentProofImage: paymentProofImage || targetOrder.paymentProofImage,
     };
 
-    setBookings((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+    updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
     // Buat Notifikasi Otomatis untuk Admin beserta Kata-Kata Konfirmasi WA Pelanggan
     const waConfirm = buildAdminWaConfirmationMessage(updatedOrder);
@@ -535,11 +623,11 @@ export default function App() {
     showToast('Berhasil Disalin', `${label} telah disalin ke papan klip.`);
   };
 
-  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi "Terkonfirmasi (ACC Admin)"
+  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi "Terkonfirmasi (ACC Admin)" & Amankan ke Buku Besar Omzet
   const handleVerifyPayment = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     const todayIso = getTodayIso();
-    setBookings((prev) =>
+    updateBookingsAndPersist((prev) =>
       prev.map((b) =>
         b.id === orderId
           ? {
@@ -575,7 +663,7 @@ export default function App() {
     if (!targetOrder) return;
     const todayIso = getTodayIso();
 
-    setBookings((prev) =>
+    updateBookingsAndPersist((prev) =>
       prev.map((b) =>
         b.id === orderId
           ? {
@@ -588,21 +676,27 @@ export default function App() {
       )
     );
 
-    if (currentUser && currentUser.phone === targetOrder.wa) {
-      setCurrentUser((prev) => (prev ? applyPointsCompletion(prev, targetOrder.ptsEarned) : prev));
+    if (
+      currentUser &&
+      normalizePhoneDigits(currentUser.phone) === normalizePhoneDigits(targetOrder.wa)
+    ) {
+      setCurrentUser((prev) => {
+        if (!prev) return prev;
+        const updated = applyPointsCompletion(prev, targetOrder.ptsEarned);
+        saveActiveSession(updated, isAdmin);
+        return updated;
+      });
     }
 
-    const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
-    if (savedUsersStr) {
-      const list: User[] = JSON.parse(savedUsersStr);
-      const idx = list.findIndex(
-        (u) => u.phone.replace(/[^0-9]/g, '') === targetOrder.wa.replace(/[^0-9]/g, '')
+    setCustomers((prev) => {
+      const next = prev.map((u) =>
+        normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)
+          ? { ...u, points: u.points + targetOrder.ptsEarned }
+          : u
       );
-      if (idx !== -1) {
-        list[idx].points += targetOrder.ptsEarned;
-        localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
-      }
-    }
+      saveCustomersPersistently(next);
+      return next;
+    });
 
     const rewardNotif: AppNotification = {
       id: Date.now(),
@@ -624,11 +718,95 @@ export default function App() {
     );
   };
 
-  // Pelanggan Mengajukan Pembatalan / Refund (Batas Waktu > 1 Jam Sebelum Jadwal)
+  // Pelanggan Membatalkan Booking / Mengajukan Refund (Minimal 1 Jam Sebelum Jadwal -> Jadwal Langsung Kembali Tidak Terkunci)
   const handleRequestRefund = (orderId: number, refundInfo: RefundRequestInfo) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
 
+    const isCash =
+      targetOrder.payMethodType === 'cash' ||
+      refundInfo.isCashCancellation ||
+      targetOrder.paymentStatus === 'Pending';
+
+    // Jika pesanan Cash / Bayar di Tempat atau masih Pending belum bayar: langsung batalkan & kembalikan poin yang sempat ditukar
+    if (isCash) {
+      const ptsToRestore = targetOrder.ptsRedeemedCost || 0;
+      if (ptsToRestore > 0) {
+        if (
+          currentUser &&
+          normalizePhoneDigits(currentUser.phone) === normalizePhoneDigits(targetOrder.wa)
+        ) {
+          setCurrentUser((prev) => {
+            if (!prev) return prev;
+            const updated = { ...prev, points: prev.points + ptsToRestore };
+            saveActiveSession(updated, isAdmin);
+            return updated;
+          });
+        }
+        setCustomers((prev) => {
+          const next = prev.map((u) =>
+            normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)
+              ? { ...u, points: u.points + ptsToRestore }
+              : u
+          );
+          saveCustomersPersistently(next);
+          return next;
+        });
+      }
+
+      const cancelledCashOrder: BookingOrder = {
+        ...targetOrder,
+        paymentStatus: 'Refund Selesai / Dibatalkan',
+        status: 'Cancelled',
+        ptsEarned: 0,
+        refundRequest: {
+          ...refundInfo,
+          isCashCancellation: true,
+          processedAt: nowFormatted(),
+        },
+        refundRejectedReason: undefined,
+      };
+
+      updateBookingsAndPersist((prev) =>
+        prev.map((b) => (b.id === orderId ? cancelledCashOrder : b))
+      );
+
+      const adminNotif: AppNotification = {
+        id: Date.now() + 1,
+        target: 'admin',
+        type: 'refund_requested',
+        title: `🔓 Booking Cash Dibatalkan — ${cancelledCashOrder.customer} (Jam ${cancelledCashOrder.time} WIB Terbuka)`,
+        message: `Pelanggan ${cancelledCashOrder.customer} (${cancelledCashOrder.wa}) membatalkan jadwal Cash ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB. Alasan: "${refundInfo.reason}". Slot jam ${cancelledCashOrder.time} WIB kini kembali tidak terkunci.`,
+        createdAt: nowFormatted(),
+        read: false,
+        orderId: cancelledCashOrder.id,
+        customerName: cancelledCashOrder.customer,
+        customerWa: cancelledCashOrder.wa,
+      };
+
+      const customerNotif: AppNotification = {
+        id: Date.now() + 2,
+        target: 'customer',
+        targetPhone: cancelledCashOrder.wa,
+        type: 'refund_approved',
+        title: `✅ Booking Dibatalkan — Jam ${cancelledCashOrder.time} WIB Kembali Terbuka`,
+        message: `Pesanan Anda untuk jadwal ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB telah berhasil dibatalkan dan slot jadwal kembali tidak terkunci.`,
+        createdAt: nowFormatted(),
+        read: false,
+        orderId: cancelledCashOrder.id,
+      };
+
+      setNotifications((prev) => [adminNotif, customerNotif, ...prev]);
+      triggerCelebration(`Jam ${cancelledCashOrder.time} Terbuka!`);
+      showToast(
+        'Booking Berhasil Dibatalkan! 🔓',
+        `Jadwal ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB telah dibatalkan dan slot jam kembali tidak terkunci.`
+      );
+      return;
+    }
+
+    // Jika Non-Cash (QRIS / Transfer Bank / E-Wallet):
+    // Batalkan jadwal (slot jam langsung kembali tidak terkunci) & kirim pengajuan refund ke Admin
     const updatedOrder: BookingOrder = {
       ...targetOrder,
       paymentStatus: 'Menunggu Cek Refund Admin',
@@ -637,19 +815,22 @@ export default function App() {
       refundRejectedReason: undefined,
     };
 
-    setBookings((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+    updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    const isCash = updatedOrder.payMethodType === 'cash' || refundInfo.isCashCancellation;
     const waToAdminUrl = buildCustomerToAdminRefundWaMessage(updatedOrder);
 
     const adminNotif: AppNotification = {
       id: Date.now() + 1,
       target: 'admin',
       type: 'refund_requested',
-      title: `⚠️ Pengajuan ${isCash ? 'Pembatalan' : 'Refund'} Masuk — ${updatedOrder.customer} (${updatedOrder.time} WIB)`,
-      message: `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) mengajukan ${
-        isCash ? 'pembatalan jadwal Cash' : `refund sebesar ${formatRupiah(updatedOrder.total)}`
-      } untuk jadwal ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB. Alasan: "${refundInfo.reason}". Silakan verifikasi di Tab Kelola Pesanan.`,
+      title: `⚠️ Pengajuan Refund Masuk — ${updatedOrder.customer} (${updatedOrder.time} WIB • Slot Terbuka)`,
+      message: `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) membatalkan booking #GA-${String(
+        updatedOrder.id
+      ).slice(-6)} & mengajukan refund sebesar ${formatRupiah(updatedOrder.total)} ke rekening ${
+        refundInfo.bankName
+      } ${refundInfo.accountNumber} (a.n. ${refundInfo.accountHolder}). Slot jam ${
+        updatedOrder.time
+      } WIB telah kembali tidak terkunci. Silakan transfer manual & klik ACC Refund di Tab Kelola Pesanan.`,
       createdAt: nowFormatted(),
       read: false,
       orderId: updatedOrder.id,
@@ -662,24 +843,27 @@ export default function App() {
       target: 'customer',
       targetPhone: updatedOrder.wa,
       type: 'refund_requested',
-      title: `⏳ Menunggu Cek Refund Admin — Jam ${updatedOrder.time} WIB`,
-      message: `Pengajuan ${
-        isCash ? 'pembatalan jadwal' : 'pembatalan & pengembalian dana (refund)'
-      } Anda untuk jadwal ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB telah terkirim. Status pesanan kini "Menunggu Cek Refund Admin".`,
+      title: `⏳ Booking Dibatalkan & Menunggu Refund Admin — Jam ${updatedOrder.time} WIB`,
+      message: `Pembatalan booking & pengajuan refund sebesar ${formatRupiah(
+        updatedOrder.total
+      )} ke ${refundInfo.bankName} (${refundInfo.accountNumber}) telah dikirim ke Admin. Jadwal jam ${
+        updatedOrder.time
+      } WIB kini kembali tidak terkunci.`,
       createdAt: nowFormatted(),
       read: false,
       orderId: updatedOrder.id,
     };
 
     setNotifications((prev) => [adminNotif, customerNotif, ...prev]);
+    triggerCelebration(`Slot ${updatedOrder.time} Terbuka!`);
     showToast(
-      'Pengajuan Refund Terkirim! ⏳',
-      `Status pesanan Anda telah berubah menjadi "Menunggu Cek Refund Admin". Klik tombol WhatsApp di bawah untuk langsung mengirim notifikasi pengajuan refund ke WhatsApp Admin.`,
+      'Booking Dibatalkan & Pengajuan Refund Terkirim! ⏳',
+      `Jadwal jam ${updatedOrder.time} WIB kini kembali tidak terkunci dan pengajuan refund ke rekening ${refundInfo.bankName} (${refundInfo.accountNumber}) telah masuk ke Dashboard Admin. Klik tombol WhatsApp di bawah untuk mengirim pesan refund ke Admin.`,
       waToAdminUrl
     );
   };
 
-  // Admin Menyetujui Refund & Membuka Kembali Jam (Unlock Slot & Batalkan Poin)
+  // Admin Menyetujui (ACC) Refund Setelah Transfer Manual -> Ubah Status Menjadi "Refund Selesai / Dibatalkan"
   const handleApproveRefund = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
@@ -693,24 +877,25 @@ export default function App() {
     if (netPointDelta !== 0) {
       if (
         currentUser &&
-        currentUser.phone.replace(/[^0-9]/g, '') === targetOrder.wa.replace(/[^0-9]/g, '')
+        normalizePhoneDigits(currentUser.phone) === normalizePhoneDigits(targetOrder.wa)
       ) {
-        setCurrentUser((prev) =>
-          prev ? { ...prev, points: Math.max(0, prev.points + netPointDelta) } : prev
-        );
+        setCurrentUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, points: Math.max(0, prev.points + netPointDelta) };
+          saveActiveSession(updated, isAdmin);
+          return updated;
+        });
       }
 
-      const savedUsersStr = localStorage.getItem('griya_ayu_customers_live');
-      if (savedUsersStr) {
-        const list: User[] = JSON.parse(savedUsersStr);
-        const idx = list.findIndex(
-          (u) => u.phone.replace(/[^0-9]/g, '') === targetOrder.wa.replace(/[^0-9]/g, '')
+      setCustomers((prev) => {
+        const next = prev.map((u) =>
+          normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)
+            ? { ...u, points: Math.max(0, u.points + netPointDelta) }
+            : u
         );
-        if (idx !== -1) {
-          list[idx].points = Math.max(0, list[idx].points + netPointDelta);
-          localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
-        }
-      }
+        saveCustomersPersistently(next);
+        return next;
+      });
     }
 
     const updatedOrder: BookingOrder = {
@@ -723,7 +908,7 @@ export default function App() {
         : undefined,
     };
 
-    setBookings((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+    updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
     const waMsg = buildAdminApproveRefundWaMessage(updatedOrder);
     const customerNotif: AppNotification = {
@@ -731,18 +916,22 @@ export default function App() {
       target: 'customer',
       targetPhone: updatedOrder.wa,
       type: 'refund_approved',
-      title: `✅ Refund Selesai / Jadwal Dibatalkan — Jam ${updatedOrder.time} WIB`,
-      message: `Pengajuan pembatalan & refund untuk jadwal ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB telah DISETUJUI oleh Admin. Dana refund telah diproses dan slot jam telah dibuka kembali.`,
+      title: `✅ Refund Selesai Ditransfer — #GA-${String(updatedOrder.id).slice(-6)}`,
+      message: `Permintaan refund Anda sebesar ${formatRupiah(
+        updatedOrder.total
+      )} untuk pembatalan jadwal ${updatedOrder.datePretty} • Jam ${
+        updatedOrder.time
+      } WIB telah DI-ACC oleh Admin dan statusnya kini "Refund Selesai".`,
       createdAt: nowFormatted(),
       read: false,
       orderId: updatedOrder.id,
     };
 
     setNotifications((prev) => [customerNotif, ...prev]);
-    triggerCelebration(`Slot ${updatedOrder.time} Dibuka!`);
+    triggerCelebration('Refund Selesai ✓');
     showToast(
-      'Refund Disetujui & Jam Dibuka Kembali! ✅',
-      `Status pesanan ${updatedOrder.customer} menjadi "Refund Selesai / Dibatalkan", slot jam ${updatedOrder.time} WIB kini terbuka kembali (unlock), dan poin transaksi telah dibatalkan.`,
+      'Refund Selesai (ACC Admin)! ✅',
+      `Status pesanan ${updatedOrder.customer} telah diubah menjadi "Refund Selesai" dan jadwal jam ${updatedOrder.time} WIB tetap terbuka untuk pelanggan lain.`,
       waMsg.url
     );
   };
@@ -763,7 +952,7 @@ export default function App() {
       refundRejectedReason: reasonText,
     };
 
-    setBookings((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+    updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
     const waMsg = buildAdminRejectRefundWaMessage(updatedOrder, reasonText);
     const customerNotif: AppNotification = {

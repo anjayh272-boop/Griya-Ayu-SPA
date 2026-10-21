@@ -5,6 +5,7 @@ import {
   formatCountdown,
   getPaymentMethodDetails,
   isOrderLockedStatus,
+  compressImageFileToDataUrl,
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_BANK_ACCOUNTS,
@@ -84,17 +85,23 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
-  const handleUploadReceiptProof = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadReceiptProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setReceiptProofImage(reader.result);
-        setReceiptProofError('');
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      setReceiptProofImage(compressed);
+      setReceiptProofError('');
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setReceiptProofImage(reader.result);
+          setReceiptProofError('');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handlePayNowInReceipt = () => {
