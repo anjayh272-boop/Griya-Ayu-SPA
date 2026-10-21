@@ -1,0 +1,207 @@
+{
+  "entities": {
+    "Customer": {
+      "title": "Customer",
+      "description": "Registered customer or admin member account in Griya Ayu Sport Massage & SPA",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name of the customer or admin",
+          "maxLength": 120
+        },
+        "phone": {
+          "type": "string",
+          "description": "Normalized WhatsApp/phone number used as login ID",
+          "maxLength": 30
+        },
+        "pass": {
+          "type": "string",
+          "description": "Account password",
+          "maxLength": 120
+        },
+        "points": {
+          "type": "number",
+          "description": "Loyalty member points balance"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["customer", "admin"],
+          "description": "Role of the account"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Optional compressed data URL avatar"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Last update epoch timestamp in ms"
+        }
+      },
+      "required": ["name", "phone", "pass", "points"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Customer SPA booking, payment verification, omzet record, and refund state",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "Unique booking order ID (timestamp-based)"
+        },
+        "customer": {
+          "type": "string",
+          "description": "Customer full name",
+          "maxLength": 120
+        },
+        "wa": {
+          "type": "string",
+          "description": "Customer WhatsApp phone number",
+          "maxLength": 30
+        },
+        "items": {
+          "type": "string",
+          "description": "Booked massage & spa service names",
+          "maxLength": 500
+        },
+        "date": {
+          "type": "string",
+          "description": "ISO date YYYY-MM-DD",
+          "maxLength": 20
+        },
+        "datePretty": {
+          "type": "string",
+          "description": "Human-readable Indonesian date",
+          "maxLength": 60
+        },
+        "time": {
+          "type": "string",
+          "description": "Time slot HH:mm",
+          "maxLength": 10
+        },
+        "total": {
+          "type": "number",
+          "description": "Total amount in IDR"
+        },
+        "ptsEarned": {
+          "type": "number",
+          "description": "Loyalty points earned from this booking"
+        },
+        "ptsRedeemedCost": {
+          "type": "number",
+          "description": "Loyalty points redeemed on this booking"
+        },
+        "payMethod": {
+          "type": "string",
+          "description": "Payment method display label",
+          "maxLength": 100
+        },
+        "payMethodType": {
+          "type": "string",
+          "description": "Payment method code",
+          "maxLength": 30
+        },
+        "paymentStatus": {
+          "type": "string",
+          "description": "Current payment and verification status",
+          "maxLength": 60
+        },
+        "expiresAt": {
+          "type": "number",
+          "description": "Expiration timestamp for pending payment"
+        },
+        "status": {
+          "type": "string",
+          "description": "Order lifecycle status",
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Formatted creation timestamp",
+          "maxLength": 60
+        },
+        "verifiedDateIso": {
+          "type": "string",
+          "description": "ISO date when admin verified the payment for daily/monthly omzet",
+          "maxLength": 20
+        },
+        "paymentProofImage": {
+          "type": "string",
+          "description": "Compressed data URL of payment proof"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Last update timestamp in ms"
+        }
+      },
+      "required": ["id", "customer", "wa", "items", "date", "time", "total", "paymentStatus", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Real-time notification for admin and customers",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "Unique notification ID"
+        },
+        "target": {
+          "type": "string",
+          "enum": ["admin", "customer", "all_customers"]
+        },
+        "targetPhone": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "read": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "target", "type", "title", "message", "createdAt", "read"]
+    },
+    "SpaSettings": {
+      "title": "SpaSettings",
+      "description": "Global operational settings including time slots, holidays, and admin profile",
+      "type": "object",
+      "properties": {
+        "updatedAt": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/griya_customers/{phoneId}": {
+      "schema": "Customer",
+      "description": "Global customer and member accounts synced across all devices"
+    },
+    "/griya_bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "Global bookings, payment proofs, refunds, and verified omzet records"
+    },
+    "/griya_notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "Global notifications for admin and customers"
+    },
+    "/griya_config/{configId}": {
+      "schema": "SpaSettings",
+      "description": "Global operational schedule, holidays, and admin account configuration"
+    }
+  }
+}

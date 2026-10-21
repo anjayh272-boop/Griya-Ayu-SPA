@@ -7,15 +7,24 @@ import {
   safeLoadJson,
   STORAGE_KEYS,
 } from '../utils/spaLogic.ts';
+import {
+  fetchCustomerFromCloud,
+  fetchSpaSettingsFromCloud,
+  syncCustomerToCloud,
+} from '../utils/cloudSync.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
 interface AuthScreenProps {
+  customers?: User[];
+  adminProfile?: User | null;
   onLoginSuccess: (user: User, isAdmin: boolean) => void;
   onRegisterSuccess: (user: User) => void;
   onShowToast: (title: string, message: string, waUrl?: string) => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
+  customers,
+  adminProfile,
   onLoginSuccess,
   onRegisterSuccess,
   onShowToast,
@@ -36,7 +45,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
   const getStoredCustomers = (): User[] => {
-    return loadCustomersPersistently(INITIAL_USERS);
+    const localList = loadCustomersPersistently(INITIAL_USERS);
+    if (!customers || customers.length === 0) return localList;
+    const map = new Map<string, User>();
+    localList.forEach((u) => map.set(normalizePhone(u.phone), u));
+    customers.forEach((u) => map.set(normalizePhone(u.phone), u));
+    return Array.from(map.values());
   };
 
   const normalizePhone = (phone: string): string => {
@@ -47,7 +61,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     return digits;
   };
 
-  const handleLogin = (e?: React.FormEvent) => {
+  const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanPhone = normalizePhone(loginPhone);
     const cleanPass = loginPassword.trim();
@@ -60,17 +74,29 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Cek Akun Admin Utama: 085183110392 // RISMAWATI (maupun Ibu Kartini)
-    const savedAdmin: User | null = safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
+    // Cek Akun Admin Utama: 085183110392 // RISMAWATI (tersinkron global di Cloud)
+    let savedAdmin: User | null =
+      adminProfile || safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
+
+    if (cleanPhone === '085183110392' || cleanPhone === '081585921993') {
+      const cloudSettings = await fetchSpaSettingsFromCloud();
+      if (cloudSettings?.adminProfile) {
+        savedAdmin = cloudSettings.adminProfile;
+      }
+    }
+
     const expectedAdminPass = savedAdmin?.pass || 'RISMAWATI';
 
     const isMainAdmin =
       cleanPhone === '085183110392' &&
       (cleanPass.toUpperCase() === expectedAdminPass.toUpperCase() ||
+        cleanPass === expectedAdminPass ||
         cleanPass.toUpperCase() === 'RISMAWATI');
     const isSecondaryAdmin =
       cleanPhone === '081585921993' &&
-      (cleanPass === 'admin123' || cleanPass.toUpperCase() === 'RISMAWATI');
+      (cleanPass === 'admin123' ||
+        cleanPass.toUpperCase() === expectedAdminPass.toUpperCase() ||
+        cleanPass.toUpperCase() === 'RISMAWATI');
 
     if (isMainAdmin || isSecondaryAdmin) {
       const adminUser: User = savedAdmin || {
@@ -93,9 +119,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Cek di database pelanggan terdaftar
+    // Cek di database pelanggan terdaftar (lokal + cloud global)
     const usersList = getStoredCustomers();
-    const existingUser = usersList.find((u) => normalizePhone(u.phone) === cleanPhone);
+    let existingUser = usersList.find((u) => normalizePhone(u.phone) === cleanPhone);
+
+    // Ambil data terbaru langsung dari Cloud agar pendaftaran/perubahan sandi dari HP lain langsung terbaca
+    const cloudUser = await fetchCustomerFromCloud(cleanPhone);
+    if (cloudUser) {
+      existingUser = cloudUser;
+    }
 
     // WAJIB DAFTAR DULU JIKA BELUM PERNAH DAFTAR
     if (!existingUser) {
@@ -119,7 +151,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     onLoginSuccess(existingUser, false);
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = regName.trim();
     const cleanPhone = normalizePhone(regPhone);
@@ -168,7 +200,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     const usersList = getStoredCustomers();
-    const already = usersList.find((u) => normalizePhone(u.phone) === cleanPhone);
+    let already = usersList.find((u) => normalizePhone(u.phone) === cleanPhone);
+    if (!already) {
+      const cloudExisting = await fetchCustomerFromCloud(cleanPhone);
+      if (cloudExisting) {
+        already = cloudExisting;
+      }
+    }
 
     if (already) {
       onShowToast(
@@ -180,7 +218,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Pendaftar baru dapat +20 Poin bonus
+    // Pendaftar baru dapat +20 Poin bonus & langsung disimpan ke Cloud Global
     const newCustomer: User = {
       name: cleanName,
       phone: cleanPhone,
@@ -191,6 +229,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     const updatedList = [...usersList, newCustomer];
     saveCustomersPersistently(updatedList);
+    await syncCustomerToCloud(newCustomer);
 
     onRegisterSuccess(newCustomer);
   };

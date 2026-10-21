@@ -4,11 +4,14 @@ import {
   formatRupiah,
   isVerifiedRevenueOrder,
   compressImageFileToDataUrl,
+  loadCustomersPersistently,
+  saveCustomersPersistently,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
 } from '../utils/spaLogic.ts';
+import { syncCustomerToCloud } from '../utils/cloudSync.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
 const FONNTE_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
@@ -17,9 +20,11 @@ interface AccountPanelProps {
   currentUser: User;
   isAdmin: boolean;
   bookings: BookingOrder[];
+  customers?: User[];
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
+  onUpdateCustomerAccount?: (updated: User) => void;
   onViewReceipt: (order: BookingOrder) => void;
   onLogout: () => void;
   onShowToast: (title: string, message: string, waUrl?: string) => void;
@@ -36,9 +41,11 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   currentUser,
   isAdmin,
   bookings,
+  customers,
   language,
   onChangeLanguage,
   onUpdateUser,
+  onUpdateCustomerAccount,
   onViewReceipt,
   onLogout,
   onShowToast,
@@ -236,8 +243,8 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
     setActiveSection('menu');
   };
 
-  // Admin helper to reset a customer's password
-  const handleAdminResetCustomerPass = (e: React.FormEvent) => {
+  // Admin helper to reset a customer's password (synced globally to Cloud)
+  const handleAdminResetCustomerPass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCustomerPhone || adminResetNewPass.trim().length < 6) {
       onShowToast(
@@ -246,26 +253,32 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       );
       return;
     }
-    const savedStr = localStorage.getItem('griya_ayu_customers_live');
-    if (savedStr) {
-      const list: User[] = JSON.parse(savedStr);
-      const idx = list.findIndex((u) => u.phone === selectedCustomerPhone);
-      if (idx !== -1) {
-        list[idx].pass = adminResetNewPass.trim();
-        localStorage.setItem('griya_ayu_customers_live', JSON.stringify(list));
-        onShowToast(
-          'Sandi Pelanggan Direset! ✅',
-          `Kata sandi untuk member ${list[idx].name} (${list[idx].phone}) berhasil diubah menjadi: ${adminResetNewPass.trim()}`
-        );
-        setAdminResetNewPass('');
+    const baseList =
+      customers && customers.length > 0 ? [...customers] : loadCustomersPersistently([]);
+    const idx = baseList.findIndex((u) => u.phone === selectedCustomerPhone);
+    if (idx !== -1) {
+      const updatedCustomer: User = {
+        ...baseList[idx],
+        pass: adminResetNewPass.trim(),
+      };
+      baseList[idx] = updatedCustomer;
+      saveCustomersPersistently(baseList);
+      await syncCustomerToCloud(updatedCustomer);
+      if (onUpdateCustomerAccount) {
+        onUpdateCustomerAccount(updatedCustomer);
       }
+      onShowToast(
+        'Sandi Pelanggan Direset! ✅',
+        `Kata sandi untuk member ${updatedCustomer.name} (${updatedCustomer.phone}) berhasil diubah menjadi: ${adminResetNewPass.trim()}`
+      );
+      setAdminResetNewPass('');
     }
   };
 
   const storedCustomers: User[] = React.useMemo(() => {
-    const saved = localStorage.getItem('griya_ayu_customers_live');
-    return saved ? JSON.parse(saved) : [];
-  }, [activeSection]);
+    if (customers && customers.length > 0) return customers;
+    return loadCustomersPersistently([]);
+  }, [customers, activeSection]);
 
   const userTransactions = isAdmin
     ? bookings

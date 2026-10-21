@@ -42,6 +42,13 @@ import {
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
 } from './utils/spaLogic.ts';
+import {
+  subscribeToGlobalCloudState,
+  syncCustomerToCloud,
+  syncBookingToCloud,
+  syncNotificationToCloud,
+  syncSpaSettingsToCloud,
+} from './utils/cloudSync.ts';
 import { CelebrationLayer } from './components/CelebrationLayer.tsx';
 import { ToastModal } from './components/ToastModal.tsx';
 import { PaymentModal } from './components/PaymentModal.tsx';
@@ -107,6 +114,10 @@ export default function App() {
     safeLoadJson<string[]>(STORAGE_KEYS.CLOSED_DATES, [])
   );
 
+  const [adminProfile, setAdminProfile] = useState<User | null>(() =>
+    safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null)
+  );
+
   // Modals & Popups
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [activePaymentOrderId, setActivePaymentOrderId] = useState<number | null>(null);
@@ -135,6 +146,153 @@ export default function App() {
     pointsText: null,
     confettiActive: false,
   });
+
+  // =========================================================================
+  // REAL-TIME GLOBAL CLOUD SYNC (FIRESTORE LINTAS PERANGKAT / VERCEL)
+  // =========================================================================
+  useEffect(() => {
+    const unsubscribe = subscribeToGlobalCloudState({
+      onCustomersSnapshot: (cloudCustomers) => {
+        setCustomers((prevLocal) => {
+          const mapByPhone = new Map<string, User>();
+          const missingInCloud: User[] = [];
+
+          // Utamakan data dari Cloud
+          cloudCustomers.forEach((cu) => {
+            const key = normalizePhoneDigits(cu.phone);
+            if (key) mapByPhone.set(key, cu);
+          });
+
+          // Jika ada data di perangkat lokal yang belum pernah terunggah ke Cloud, migrasikan otomatis
+          prevLocal.forEach((lu) => {
+            const key = normalizePhoneDigits(lu.phone);
+            if (key && !mapByPhone.has(key)) {
+              mapByPhone.set(key, lu);
+              missingInCloud.push(lu);
+            }
+          });
+
+          if (missingInCloud.length > 0) {
+            missingInCloud.forEach((u) => {
+              void syncCustomerToCloud(u);
+            });
+          }
+
+          const merged = Array.from(mapByPhone.values());
+          saveCustomersPersistently(merged);
+
+          // Perbarui currentUser jika pelanggan sedang login (misal poin bertambah / sandi berubah)
+          setCurrentUser((curr) => {
+            if (!curr || curr.role === 'admin') return curr;
+            const updatedSelf = mapByPhone.get(normalizePhoneDigits(curr.phone));
+            if (
+              updatedSelf &&
+              (updatedSelf.points !== curr.points ||
+                updatedSelf.name !== curr.name ||
+                updatedSelf.pass !== curr.pass ||
+                updatedSelf.avatar !== curr.avatar)
+            ) {
+              saveActiveSession(updatedSelf, false);
+              return updatedSelf;
+            }
+            return curr;
+          });
+
+          return merged;
+        });
+      },
+
+      onBookingsSnapshot: (cloudBookings) => {
+        setBookings((prevLocal) => {
+          const mapById = new Map<number, BookingOrder>();
+          const missingInCloud: BookingOrder[] = [];
+
+          cloudBookings.forEach((cb) => {
+            if (cb && typeof cb.id === 'number') {
+              mapById.set(cb.id, cb);
+            }
+          });
+
+          prevLocal.forEach((lb) => {
+            if (lb && typeof lb.id === 'number' && !mapById.has(lb.id)) {
+              mapById.set(lb.id, lb);
+              missingInCloud.push(lb);
+            }
+          });
+
+          if (missingInCloud.length > 0) {
+            missingInCloud.forEach((b) => {
+              void syncBookingToCloud(b);
+            });
+          }
+
+          const merged = Array.from(mapById.values()).sort((a, b) => b.id - a.id);
+          saveBookingsPersistently(merged);
+          return merged;
+        });
+      },
+
+      onNotificationsSnapshot: (cloudNotifs) => {
+        setNotifications((prevLocal) => {
+          const mapById = new Map<number, AppNotification>();
+          const missingInCloud: AppNotification[] = [];
+
+          cloudNotifs.forEach((cn) => {
+            if (cn && typeof cn.id === 'number') {
+              mapById.set(cn.id, cn);
+            }
+          });
+
+          prevLocal.forEach((ln) => {
+            if (ln && typeof ln.id === 'number' && !mapById.has(ln.id)) {
+              mapById.set(ln.id, ln);
+              missingInCloud.push(ln);
+            }
+          });
+
+          if (missingInCloud.length > 0) {
+            missingInCloud.slice(0, 30).forEach((n) => {
+              void syncNotificationToCloud(n);
+            });
+          }
+
+          const merged = Array.from(mapById.values())
+            .sort((a, b) => b.id - a.id)
+            .slice(0, 150);
+          safeSaveJson(STORAGE_KEYS.NOTIFICATIONS, merged);
+          return merged;
+        });
+      },
+
+      onSettingsSnapshot: (settings) => {
+        if (Array.isArray(settings.timeSlots) && settings.timeSlots.length > 0) {
+          setMasterTimeSlots(settings.timeSlots);
+          safeSaveJson(STORAGE_KEYS.SLOTS, settings.timeSlots);
+        }
+        if (Array.isArray(settings.closedWeekdays)) {
+          setClosedWeekdays(settings.closedWeekdays);
+          safeSaveJson(STORAGE_KEYS.CLOSED_WEEKDAYS, settings.closedWeekdays);
+        }
+        if (Array.isArray(settings.closedSpecificDates)) {
+          setClosedSpecificDates(settings.closedSpecificDates);
+          safeSaveJson(STORAGE_KEYS.CLOSED_DATES, settings.closedSpecificDates);
+        }
+        if (settings.adminProfile) {
+          setAdminProfile(settings.adminProfile);
+          safeSaveJson(STORAGE_KEYS.ADMIN_PROFILE, settings.adminProfile);
+          setCurrentUser((curr) => {
+            if (!curr || curr.role !== 'admin') return curr;
+            saveActiveSession(settings.adminProfile!, true);
+            return settings.adminProfile!;
+          });
+        }
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -174,13 +332,32 @@ export default function App() {
     }
   }, [currentUser, isAdmin, activeScreen]);
 
-  // Helper update bookings & langsung amankan ke localStorage secara sinkron
+  // Helper update bookings & langsung amankan ke Cloud Global + localStorage
   const updateBookingsAndPersist = (
     updater: (prev: BookingOrder[]) => BookingOrder[]
   ) => {
     setBookings((prev) => {
       const next = updater(prev);
       saveBookingsPersistently(next);
+      // Sinkronkan setiap pesanan yang baru/berubah ke Firestore
+      next.forEach((order) => {
+        const oldOrder = prev.find((p) => p.id === order.id);
+        if (!oldOrder || JSON.stringify(oldOrder) !== JSON.stringify(order)) {
+          void syncBookingToCloud(order);
+        }
+      });
+      return next;
+    });
+  };
+
+  // Helper tambah notifikasi & langsung amankan ke Cloud Global + localStorage
+  const addNotificationsAndSync = (newNotifs: AppNotification[]) => {
+    newNotifs.forEach((n) => {
+      void syncNotificationToCloud(n);
+    });
+    setNotifications((prev) => {
+      const next = [...newNotifs, ...prev];
+      safeSaveJson(STORAGE_KEYS.NOTIFICATIONS, next);
       return next;
     });
   };
@@ -221,11 +398,13 @@ export default function App() {
       setIsAdmin(false);
       setActiveScreen('app');
       saveActiveSession(resolvedUser, false);
+      void syncCustomerToCloud(resolvedUser);
       triggerCelebration(`${resolvedUser.points} Poin Member`);
       return;
     }
 
     setCurrentUser(user);
+    setAdminProfile(user);
     setIsAdmin(true);
     setActiveScreen('app');
     saveActiveSession(user, true);
@@ -233,6 +412,7 @@ export default function App() {
   };
 
   const handleRegisterSuccess = (user: User) => {
+    void syncCustomerToCloud(user);
     setCustomers((prev) => {
       const exists = prev.some(
         (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(user.phone)
@@ -261,8 +441,11 @@ export default function App() {
     saveActiveSession(updatedUser, isAdmin);
 
     if (isAdmin) {
+      setAdminProfile(updatedUser);
       safeSaveJson(STORAGE_KEYS.ADMIN_PROFILE, updatedUser);
+      void syncSpaSettingsToCloud({ adminProfile: updatedUser });
     } else {
+      void syncCustomerToCloud(updatedUser);
       setCustomers((prev) => {
         const idx = prev.findIndex(
           (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(updatedUser.phone)
@@ -275,6 +458,21 @@ export default function App() {
         return next;
       });
     }
+  };
+
+  const handleUpdateCustomerAccount = (updatedCustomer: User) => {
+    void syncCustomerToCloud(updatedCustomer);
+    setCustomers((prev) => {
+      const idx = prev.findIndex(
+        (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(updatedCustomer.phone)
+      );
+      const next =
+        idx !== -1
+          ? prev.map((u, i) => (i === idx ? updatedCustomer : u))
+          : [...prev, updatedCustomer];
+      saveCustomersPersistently(next);
+      return next;
+    });
   };
 
   const handleLogout = () => {
@@ -358,6 +556,7 @@ export default function App() {
       };
       setCurrentUser(updatedUser);
       saveActiveSession(updatedUser, isAdmin);
+      void syncCustomerToCloud(updatedUser);
 
       setCustomers((prev) => {
         const next = prev.map((u) =>
@@ -446,7 +645,7 @@ export default function App() {
         orderId: newBooking.id,
       };
 
-      setNotifications((prev) => [adminNotif, customerNotif, ...prev]);
+      addNotificationsAndSync([adminNotif, customerNotif]);
       triggerCelebration(`Jam ${newBooking.time} Terkunci!`);
     } else {
       const pendingNotif: AppNotification = {
@@ -460,7 +659,7 @@ export default function App() {
         read: false,
         orderId: newBooking.id,
       };
-      setNotifications((prev) => [pendingNotif, ...prev]);
+      addNotificationsAndSync([pendingNotif]);
     }
 
     setReceiptOrderId(newBooking.id);
@@ -499,7 +698,7 @@ export default function App() {
         read: false,
         orderId: targetOrder.id,
       };
-      setNotifications((prev) => [pendingNotif, ...prev]);
+      addNotificationsAndSync([pendingNotif]);
     }
   };
 
@@ -540,6 +739,7 @@ export default function App() {
       };
       setCurrentUser(updatedUser);
       saveActiveSession(updatedUser, isAdmin);
+      void syncCustomerToCloud(updatedUser);
 
       setCustomers((prev) => {
         const next = prev.map((u) =>
@@ -612,7 +812,7 @@ export default function App() {
       orderId: updatedOrder.id,
     };
 
-    setNotifications((prev) => [adminNotif, customerNotif, ...prev]);
+    addNotificationsAndSync([adminNotif, customerNotif]);
     setPaymentModalOpen(false);
     triggerCelebration(`Jam ${updatedOrder.time} Lock`);
     setReceiptOrderId(updatedOrder.id);
@@ -623,7 +823,7 @@ export default function App() {
     showToast('Berhasil Disalin', `${label} telah disalin ke papan klip.`);
   };
 
-  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi "Terkonfirmasi (ACC Admin)" & Amankan ke Buku Besar Omzet
+  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi "Terkonfirmasi (ACC Admin)" & Amankan ke Buku Besar Omzet + Cloud
   const handleVerifyPayment = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     const todayIso = getTodayIso();
@@ -652,7 +852,7 @@ export default function App() {
         read: false,
         orderId: targetOrder.id,
       };
-      setNotifications((prev) => [confirmNotif, ...prev]);
+      addNotificationsAndSync([confirmNotif]);
     }
 
     triggerCelebration('Terkonfirmasi (ACC) ✓');
@@ -684,16 +884,20 @@ export default function App() {
         if (!prev) return prev;
         const updated = applyPointsCompletion(prev, targetOrder.ptsEarned);
         saveActiveSession(updated, isAdmin);
+        void syncCustomerToCloud(updated);
         return updated;
       });
     }
 
     setCustomers((prev) => {
-      const next = prev.map((u) =>
-        normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)
-          ? { ...u, points: u.points + targetOrder.ptsEarned }
-          : u
-      );
+      const next = prev.map((u) => {
+        if (normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)) {
+          const updatedCustomer = { ...u, points: u.points + targetOrder.ptsEarned };
+          void syncCustomerToCloud(updatedCustomer);
+          return updatedCustomer;
+        }
+        return u;
+      });
       saveCustomersPersistently(next);
       return next;
     });
@@ -709,7 +913,7 @@ export default function App() {
       read: false,
       orderId: targetOrder.id,
     };
-    setNotifications((prev) => [rewardNotif, ...prev]);
+    addNotificationsAndSync([rewardNotif]);
 
     triggerCelebration(`+${targetOrder.ptsEarned} Poin Terkirim!`);
     showToast(
@@ -740,15 +944,19 @@ export default function App() {
             if (!prev) return prev;
             const updated = { ...prev, points: prev.points + ptsToRestore };
             saveActiveSession(updated, isAdmin);
+            void syncCustomerToCloud(updated);
             return updated;
           });
         }
         setCustomers((prev) => {
-          const next = prev.map((u) =>
-            normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)
-              ? { ...u, points: u.points + ptsToRestore }
-              : u
-          );
+          const next = prev.map((u) => {
+            if (normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)) {
+              const updatedCustomer = { ...u, points: u.points + ptsToRestore };
+              void syncCustomerToCloud(updatedCustomer);
+              return updatedCustomer;
+            }
+            return u;
+          });
           saveCustomersPersistently(next);
           return next;
         });
@@ -796,7 +1004,7 @@ export default function App() {
         orderId: cancelledCashOrder.id,
       };
 
-      setNotifications((prev) => [adminNotif, customerNotif, ...prev]);
+      addNotificationsAndSync([adminNotif, customerNotif]);
       triggerCelebration(`Jam ${cancelledCashOrder.time} Terbuka!`);
       showToast(
         'Booking Berhasil Dibatalkan! 🔓',
@@ -854,7 +1062,7 @@ export default function App() {
       orderId: updatedOrder.id,
     };
 
-    setNotifications((prev) => [adminNotif, customerNotif, ...prev]);
+    addNotificationsAndSync([adminNotif, customerNotif]);
     triggerCelebration(`Slot ${updatedOrder.time} Terbuka!`);
     showToast(
       'Booking Dibatalkan & Pengajuan Refund Terkirim! ⏳',
@@ -883,16 +1091,20 @@ export default function App() {
           if (!prev) return prev;
           const updated = { ...prev, points: Math.max(0, prev.points + netPointDelta) };
           saveActiveSession(updated, isAdmin);
+          void syncCustomerToCloud(updated);
           return updated;
         });
       }
 
       setCustomers((prev) => {
-        const next = prev.map((u) =>
-          normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)
-            ? { ...u, points: Math.max(0, u.points + netPointDelta) }
-            : u
-        );
+        const next = prev.map((u) => {
+          if (normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)) {
+            const updatedCustomer = { ...u, points: Math.max(0, u.points + netPointDelta) };
+            void syncCustomerToCloud(updatedCustomer);
+            return updatedCustomer;
+          }
+          return u;
+        });
         saveCustomersPersistently(next);
         return next;
       });
@@ -927,7 +1139,7 @@ export default function App() {
       orderId: updatedOrder.id,
     };
 
-    setNotifications((prev) => [customerNotif, ...prev]);
+    addNotificationsAndSync([customerNotif]);
     triggerCelebration('Refund Selesai ✓');
     showToast(
       'Refund Selesai (ACC Admin)! ✅',
@@ -967,7 +1179,7 @@ export default function App() {
       orderId: updatedOrder.id,
     };
 
-    setNotifications((prev) => [customerNotif, ...prev]);
+    addNotificationsAndSync([customerNotif]);
     showToast(
       'Pengajuan Refund Ditolak',
       `Klaim refund dari ${updatedOrder.customer} telah dibatalkan dan status pesanan dikembalikan menjadi aktif.`,
@@ -994,7 +1206,7 @@ export default function App() {
       read: false,
     };
 
-    setNotifications((prev) => [promoNotif, ...prev]);
+    addNotificationsAndSync([promoNotif]);
     triggerCelebration('Bot Promo Terkirim!');
     showToast(
       'Bot Promo Berhasil Dikirim ke Semua Pelanggan! 🤖✨',
@@ -1005,43 +1217,69 @@ export default function App() {
   const handleMarkCustomerNotificationsRead = () => {
     if (!currentUser) return;
     setNotifications((prev) =>
-      prev.map((n) =>
-        n.target === 'all_customers' ||
-        (n.target === 'customer' &&
-          (!n.targetPhone ||
-            n.targetPhone.replace(/[^0-9]/g, '') === currentUser.phone.replace(/[^0-9]/g, '')))
-          ? { ...n, read: true }
-          : n
-      )
+      prev.map((n) => {
+        const shouldMark =
+          n.target === 'all_customers' ||
+          (n.target === 'customer' &&
+            (!n.targetPhone ||
+              n.targetPhone.replace(/[^0-9]/g, '') === currentUser.phone.replace(/[^0-9]/g, '')));
+        if (shouldMark && !n.read) {
+          const updated = { ...n, read: true };
+          void syncNotificationToCloud(updated);
+          return updated;
+        }
+        return n;
+      })
     );
   };
 
   const handleMarkAdminNotificationsRead = () => {
     setNotifications((prev) =>
-      prev.map((n) => (n.target === 'admin' ? { ...n, read: true } : n))
+      prev.map((n) => {
+        if (n.target === 'admin' && !n.read) {
+          const updated = { ...n, read: true };
+          void syncNotificationToCloud(updated);
+          return updated;
+        }
+        return n;
+      })
     );
   };
 
   const handleToggleWeekdayHoliday = (dayIdx: number) => {
-    setClosedWeekdays((prev) =>
-      prev.includes(dayIdx) ? prev.filter((d) => d !== dayIdx) : [...prev, dayIdx]
-    );
+    setClosedWeekdays((prev) => {
+      const next = prev.includes(dayIdx)
+        ? prev.filter((d) => d !== dayIdx)
+        : [...prev, dayIdx];
+      void syncSpaSettingsToCloud({ closedWeekdays: next });
+      return next;
+    });
   };
 
   const handleToggleCustomHolidayDate = (dateIso: string) => {
-    setClosedSpecificDates((prev) =>
-      prev.includes(dateIso) ? prev.filter((d) => d !== dateIso) : [...prev, dateIso]
-    );
+    setClosedSpecificDates((prev) => {
+      const next = prev.includes(dateIso)
+        ? prev.filter((d) => d !== dateIso)
+        : [...prev, dateIso];
+      void syncSpaSettingsToCloud({ closedSpecificDates: next });
+      return next;
+    });
   };
 
   const handleRemoveSpecificHoliday = (dateIso: string) => {
-    setClosedSpecificDates((prev) => prev.filter((d) => d !== dateIso));
+    setClosedSpecificDates((prev) => {
+      const next = prev.filter((d) => d !== dateIso);
+      void syncSpaSettingsToCloud({ closedSpecificDates: next });
+      return next;
+    });
   };
 
   const handleToggleMasterSlot = (slotTime: string) => {
-    setMasterTimeSlots((prev) =>
-      prev.map((s) => (s.time === slotTime ? { ...s, active: !s.active } : s))
-    );
+    setMasterTimeSlots((prev) => {
+      const next = prev.map((s) => (s.time === slotTime ? { ...s, active: !s.active } : s));
+      void syncSpaSettingsToCloud({ timeSlots: next });
+      return next;
+    });
   };
 
   const handleAddNewTimeSlot = (slotTime: string) => {
@@ -1053,6 +1291,7 @@ export default function App() {
       a.time.localeCompare(b.time)
     );
     setMasterTimeSlots(updated);
+    void syncSpaSettingsToCloud({ timeSlots: updated });
     showToast('Jam Ditambahkan', `Slot jam ${slotTime} berhasil ditambahkan.`);
   };
 
@@ -1080,6 +1319,8 @@ export default function App() {
         {/* =============================================================== */}
         {activeScreen === 'auth' && (
           <AuthScreen
+            customers={customers}
+            adminProfile={adminProfile}
             onLoginSuccess={handleLoginSuccess}
             onRegisterSuccess={handleRegisterSuccess}
             onShowToast={showToast}
@@ -1117,6 +1358,7 @@ export default function App() {
         {activeScreen === 'app' && isAdmin && currentUser && (
           <AdminDashboard
             currentUser={currentUser}
+            customers={customers}
             bookings={bookings}
             notifications={notifications}
             masterTimeSlots={masterTimeSlots}
@@ -1125,6 +1367,7 @@ export default function App() {
             language={language}
             onChangeLanguage={setLanguage}
             onUpdateUser={handleUpdateUser}
+            onUpdateCustomerAccount={handleUpdateCustomerAccount}
             onVerifyPayment={handleVerifyPayment}
             onCompleteTreatment={handleCompleteTreatment}
             onApproveRefund={handleApproveRefund}

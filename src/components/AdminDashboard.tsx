@@ -28,6 +28,7 @@ import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
 interface AdminDashboardProps {
   currentUser: User;
+  customers?: User[];
   bookings: BookingOrder[];
   notifications: AppNotification[];
   masterTimeSlots: TimeSlot[];
@@ -36,6 +37,7 @@ interface AdminDashboardProps {
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
+  onUpdateCustomerAccount?: (updated: User) => void;
   onVerifyPayment: (orderId: number) => void;
   onCompleteTreatment: (orderId: number) => void;
   onApproveRefund: (orderId: number) => void;
@@ -60,6 +62,7 @@ interface AdminDashboardProps {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentUser,
+  customers,
   bookings,
   notifications,
   masterTimeSlots,
@@ -68,6 +71,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   language,
   onChangeLanguage,
   onUpdateUser,
+  onUpdateCustomerAccount,
   onVerifyPayment,
   onCompleteTreatment,
   onApproveRefund,
@@ -168,8 +172,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const storedCustomers: User[] = React.useMemo(() => {
+    if (customers && customers.length > 0) return customers;
     return loadCustomersPersistently(INITIAL_USERS);
-  }, [adminSubTab, bookings.length]);
+  }, [customers, adminSubTab, bookings.length]);
 
   const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -1541,9 +1546,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               currentUser={currentUser}
               isAdmin={true}
               bookings={bookings}
+              customers={storedCustomers}
               language={language}
               onChangeLanguage={onChangeLanguage}
               onUpdateUser={onUpdateUser}
+              onUpdateCustomerAccount={onUpdateCustomerAccount}
               onViewReceipt={onViewReceipt}
               onLogout={onLogout}
               onShowToast={onShowToast}
