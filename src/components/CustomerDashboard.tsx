@@ -123,8 +123,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [showPriceListImages, setShowPriceListImages] = useState<boolean>(false);
   const [chosenSingleIds, setChosenSingleIds] = useState<string[]>([]);
   const [chosenPackageId, setChosenPackageId] = useState<string>('');
-  const [chosenInjurySpot, setChosenInjurySpot] = useState<string>('Lutut (Knee)');
-  const [isInjuryPickerOpen, setIsInjuryPickerOpen] = useState<boolean>(false);
+  const [injurySpotsByService, setInjurySpotsByService] = useState<Record<string, string[]>>({
+    s2: ['Lutut (Knee)'],
+    s4: ['Pinggang / Saraf Kejepit (Low Back)'],
+  });
+  const [openInjuryServiceId, setOpenInjuryServiceId] = useState<string | null>(null);
 
   // Pilihan lokasi sesi: Studio vs Home Service (+Biaya Perjalanan)
   const [visitType, setVisitType] = useState<'studio' | 'home_service'>('studio');
@@ -343,7 +346,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     selectedRewardId,
     POINT_REWARDS,
     currentUser.points,
-    chosenInjurySpot
+    injurySpotsByService
   );
 
   const finalItemsSummary =
@@ -355,16 +358,41 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     if (chosenSingleIds.includes(id)) {
       const updated = chosenSingleIds.filter((item) => item !== id);
       setChosenSingleIds(updated);
-      if (!updated.includes('s2') && !updated.includes('s4')) {
-        setIsInjuryPickerOpen(false);
+      if (openInjuryServiceId === id) {
+        setOpenInjuryServiceId(null);
       }
     } else {
       const updated = [...chosenSingleIds, id];
       setChosenSingleIds(updated);
       if (id === 's2' || id === 's4') {
-        setIsInjuryPickerOpen(true);
+        setInjurySpotsByService((prev) => {
+          const current = prev[id] || [];
+          if (current.length > 0) return prev;
+          return {
+            ...prev,
+            [id]: [
+              id === 's4'
+                ? 'Pinggang / Saraf Kejepit (Low Back)'
+                : 'Lutut (Knee)',
+            ],
+          };
+        });
+        setOpenInjuryServiceId(id);
       }
     }
+  };
+
+  const toggleInjurySpotForService = (serviceId: string, spot: string) => {
+    setInjurySpotsByService((prev) => {
+      const current = prev[serviceId] || [];
+      const exists = current.includes(spot);
+      if (exists) {
+        // Jangan biarkan kosong sama sekali jika sudah dipilih, minimal 1 titik atau bisa dikosongkan lalu dipilih lagi
+        const filtered = current.filter((item) => item !== spot);
+        return { ...prev, [serviceId]: filtered };
+      }
+      return { ...prev, [serviceId]: [...current, spot] };
+    });
   };
 
   const handleDateSelect = (
@@ -534,7 +562,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         setBookingStep(1);
         setChosenSingleIds([]);
         setChosenPackageId('');
-        setIsInjuryPickerOpen(false);
+        setOpenInjuryServiceId(null);
         setSelectedTimeSlot(null);
         setStep3PendingOrderId(null);
         setStep3ProofImage('');
@@ -873,7 +901,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                   {/* Kategori 6: Tanya Admin WA */}
                   <a
-                    href={`https://wa.me/6285183110392?text=${encodeURIComponent(
+                    href={`https://wa.me/6287765573476?text=${encodeURIComponent(
                       `Halo Admin Griya Ayu, saya ${currentUser.name} (${currentUser.phone}) ingin konsultasi memilih terapi yang cocok sebelum booking.`
                     )}`}
                     target="_blank"
@@ -958,87 +986,193 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       const isFemaleOnly = s.gender === 'female';
                       const badgeLabel =
                         s.genderBadge || (isFemaleOnly ? '👩 Khusus Wanita' : '👨👩 Semua Gender');
+                      const hasInjuryTopping = s.id === 's2' || s.id === 's4';
+                      const serviceSpots = injurySpotsByService[s.id] || [];
+                      const isToppingOpen = isSelected && hasInjuryTopping && openInjuryServiceId === s.id;
 
                       return (
                         <div
                           key={s.id}
-                          onClick={() => toggleSingleItem(s.id)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              toggleSingleItem(s.id);
-                            }
-                          }}
-                          className={`tactile-btn w-full p-3.5 rounded-2xl border-2 text-left cursor-pointer flex justify-between items-center gap-3 transition ${
+                          className={`w-full rounded-2xl border-2 transition overflow-hidden ${
                             isSelected
                               ? 'border-[#0B261C] bg-emerald-50/90 shadow-sm'
                               : 'border-stone-200 bg-white hover:border-emerald-700/40'
                           }`}
                         >
-                          <div className="min-w-0 flex-1 space-y-1">
-                            {/* Nama Layanan (Font Besar & Jelas) */}
-                            <h4 className="font-extrabold text-sm sm:text-base text-[#0B261C] leading-snug">
-                              {s.name}
-                            </h4>
+                          {/* Baris Utama Kartu Layanan */}
+                          <div
+                            onClick={() => toggleSingleItem(s.id)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                toggleSingleItem(s.id);
+                              }
+                            }}
+                            className="tactile-btn w-full p-3.5 text-left cursor-pointer flex justify-between items-center gap-3"
+                          >
+                            <div className="min-w-0 flex-1 space-y-1">
+                              {/* Nama Layanan (Font Besar & Jelas) */}
+                              <h4 className="font-extrabold text-sm sm:text-base text-[#0B261C] leading-snug">
+                                {s.name}
+                              </h4>
 
-                            {/* Baris Info Ringkas: Durasi & Badge Gender */}
-                            <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-stone-600">
-                              <span className="inline-flex items-center gap-1 text-stone-700">
-                                <i className="fa-regular fa-clock text-emerald-700"></i>
-                                {s.duration}
-                              </span>
-                              <span>•</span>
-                              <span
-                                className={`px-2 py-0.5 rounded-md font-extrabold ${
-                                  isFemaleOnly
-                                    ? 'bg-pink-100/90 text-pink-900'
-                                    : 'bg-sky-100/90 text-sky-950'
+                              {/* Baris Info Ringkas: Durasi & Badge Gender */}
+                              <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-stone-600">
+                                <span className="inline-flex items-center gap-1 text-stone-700">
+                                  <i className="fa-regular fa-clock text-emerald-700"></i>
+                                  {s.duration}
+                                </span>
+                                <span>•</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-md font-extrabold ${
+                                    isFemaleOnly
+                                      ? 'bg-pink-100/90 text-pink-900'
+                                      : 'bg-sky-100/90 text-sky-950'
+                                  }`}
+                                >
+                                  {badgeLabel}
+                                </span>
+                              </div>
+
+                              {/* Ringkasan Titik Keluhan Terpilih (Tampil Rapi di Kartu Saat Selesai Dipilih) */}
+                              {isSelected && hasInjuryTopping && !isToppingOpen && (
+                                <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[11px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg inline-flex items-center gap-1">
+                                    <span>🎯 Titik Keluhan:</span>
+                                    <span className="font-extrabold">
+                                      {serviceSpots.length > 0
+                                        ? serviceSpots.join(', ')
+                                        : 'Belum dipilih'}
+                                    </span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenInjuryServiceId(s.id);
+                                    }}
+                                    className="tactile-btn text-[11px] font-black text-[#0B261C] bg-white hover:bg-amber-50 border border-stone-300 px-2.5 py-1 rounded-lg shadow-2xs"
+                                  >
+                                    <i className="fa-solid fa-pen-to-square mr-1 text-amber-700"></i>
+                                    Ubah Titik
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Harga Besar & Poin */}
+                              <div className="flex items-center gap-2 pt-0.5">
+                                <span className="font-black text-sm sm:text-base text-emerald-900">
+                                  {formatRupiah(s.price)}
+                                </span>
+                                <span className="text-xs font-extrabold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md">
+                                  +{s.points} Poin
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Tombol Centang / Pilih Layanan Simpel */}
+                            <div
+                              className={`px-3.5 py-2.5 rounded-xl border-2 font-black text-xs sm:text-sm flex items-center gap-1.5 flex-shrink-0 transition ${
+                                isSelected
+                                  ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37] shadow-xs'
+                                  : 'bg-stone-50 border-stone-300 text-[#0B261C]'
+                              }`}
+                            >
+                              <i
+                                className={`fa-solid ${
+                                  isSelected
+                                    ? 'fa-circle-check text-[#D4AF37]'
+                                    : 'fa-plus text-stone-500'
                                 }`}
-                              >
-                                {badgeLabel}
-                              </span>
-                              {isSelected && (s.id === 's2' || s.id === 's4') && (
+                              ></i>
+                              <span>{isSelected ? 'Terpilih' : 'Pilih'}</span>
+                            </div>
+                          </div>
+
+                          {/* SUB-MENU / TOPPING TITIK KELUHAN LANGSUNG DI BAWAH LAYANAN YANG DIPILIH */}
+                          {isToppingOpen && (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              className="p-3.5 bg-amber-50/95 border-t-2 border-amber-300 space-y-2.5 animate-page-enter"
+                            >
+                              <div className="flex justify-between items-start gap-2">
+                                <div>
+                                  <p className="text-xs sm:text-sm font-black text-[#0B261C] flex items-center gap-1.5">
+                                    <i className="fa-solid fa-person-running text-amber-600"></i>
+                                    <span>
+                                      {isEn
+                                        ? 'Select Complaint / Injury Spots (Multiple Allowed):'
+                                        : 'Pilih Titik Keluhan (Bisa Pilih Beberapa Titik):'}
+                                    </span>
+                                  </p>
+                                  <p className="text-[11px] font-semibold text-stone-600 mt-0.5">
+                                    Klik satu atau beberapa titik keluhan di bawah, lalu tekan tombol{' '}
+                                    <b>Selesai</b>.
+                                  </p>
+                                </div>
+                                <span className="text-[11px] font-black bg-amber-200/90 text-amber-950 px-2 py-0.5 rounded-lg flex-shrink-0">
+                                  {serviceSpots.length} Titik
+                                </span>
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5">
+                                {ANATOMY_LOCATIONS.map((loc) => {
+                                  const isLocActive = serviceSpots.includes(loc);
+                                  return (
+                                    <button
+                                      key={loc}
+                                      type="button"
+                                      onClick={() => toggleInjurySpotForService(s.id, loc)}
+                                      className={`tactile-btn text-xs font-extrabold px-3 py-2 rounded-xl border flex items-center gap-1.5 transition ${
+                                        isLocActive
+                                          ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C] shadow-xs'
+                                          : 'bg-white text-stone-800 border-stone-300 hover:bg-stone-50'
+                                      }`}
+                                    >
+                                      <i
+                                        className={`fa-solid ${
+                                          isLocActive
+                                            ? 'fa-square-check text-[#D4AF37]'
+                                            : 'fa-square text-stone-300'
+                                        }`}
+                                      ></i>
+                                      <span>{loc}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="pt-1 flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-stone-600 truncate">
+                                  {serviceSpots.length > 0
+                                    ? `Dipilih: ${serviceSpots.join(', ')}`
+                                    : 'Silakan pilih minimal 1 titik keluhan'}
+                                </span>
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setIsInjuryPickerOpen(true);
+                                  onClick={() => {
+                                    if (serviceSpots.length === 0) {
+                                      setInjurySpotsByService((prev) => ({
+                                        ...prev,
+                                        [s.id]: [
+                                          s.id === 's4'
+                                            ? 'Pinggang / Saraf Kejepit (Low Back)'
+                                            : 'Lutut (Knee)',
+                                        ],
+                                      }));
+                                    }
+                                    setOpenInjuryServiceId(null);
                                   }}
-                                  className="bg-amber-100 text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md font-black inline-flex items-center gap-1"
+                                  className="tactile-btn bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black text-xs px-4 py-2 rounded-xl shadow-sm flex items-center gap-1.5 flex-shrink-0 border border-[#D4AF37]/60"
                                 >
-                                  <span>🎯 {chosenInjurySpot}</span>
+                                  <i className="fa-solid fa-check"></i>
+                                  <span>Selesai</span>
                                 </button>
-                              )}
+                              </div>
                             </div>
-
-                            {/* Harga Besar & Poin */}
-                            <div className="flex items-center gap-2 pt-0.5">
-                              <span className="font-black text-sm sm:text-base text-emerald-900">
-                                {formatRupiah(s.price)}
-                              </span>
-                              <span className="text-xs font-extrabold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md">
-                                +{s.points} Poin
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Tombol Centang / Pilih Layanan Simpel */}
-                          <div
-                            className={`px-3.5 py-2.5 rounded-xl border-2 font-black text-xs sm:text-sm flex items-center gap-1.5 flex-shrink-0 transition ${
-                              isSelected
-                                ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37] shadow-xs'
-                                : 'bg-stone-50 border-stone-300 text-[#0B261C]'
-                            }`}
-                          >
-                            <i
-                              className={`fa-solid ${
-                                isSelected ? 'fa-circle-check text-[#D4AF37]' : 'fa-plus text-stone-500'
-                              }`}
-                            ></i>
-                            <span>{isSelected ? 'Terpilih' : 'Pilih'}</span>
-                          </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1133,103 +1267,55 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   </div>
                 )}
 
-                {/* Pemilih Anatomi Titik Cedera (otomatis tertutup total begitu titik dipilih) */}
-                {serviceMode === 'single' &&
-                  (chosenSingleIds.includes('s2') || chosenSingleIds.includes('s4')) &&
-                  isInjuryPickerOpen && (
-                    <div className="p-3.5 border-2 border-amber-400 bg-amber-50 rounded-2xl space-y-2.5 animate-page-enter">
+                {/* Floating Sticky Ringkasan Layanan & Tombol Lanjut (Langsung Muncul & Tetap Ada Saat Scroll) */}
+                <div
+                  className={
+                    (serviceMode === 'single' && chosenSingleIds.length > 0) ||
+                    (serviceMode === 'package' && Boolean(chosenPackageId))
+                      ? 'sticky bottom-[62px] z-30 pt-2'
+                      : 'pt-3 border-t border-stone-200'
+                  }
+                >
+                  {(serviceMode === 'single' && chosenSingleIds.length > 0) ||
+                  (serviceMode === 'package' && Boolean(chosenPackageId)) ? (
+                    <div className="bg-[#0B261C]/95 backdrop-blur-md text-white p-3.5 rounded-2xl border-2 border-[#D4AF37] shadow-[0_12px_32px_rgba(0,0,0,0.45)] space-y-2.5">
                       <div className="flex justify-between items-center gap-2">
-                        <p className="text-sm font-black text-[#0B261C] flex items-center gap-1.5">
-                          <i className="fa-solid fa-person-running text-amber-600"></i>
-                          <span>
-                            {isEn
-                              ? 'Select Injury / Nerve Area:'
-                              : 'Pilih Titik Keluhan Cedera / Saraf:'}
+                        <div className="min-w-0 flex-1 pr-2">
+                          <span className="text-xs text-emerald-300 font-bold block">
+                            Layanan Dipilih (
+                            {serviceMode === 'single'
+                              ? `${chosenSingleIds.length} Layanan`
+                              : '1 Paket'}
+                            ):
                           </span>
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => setIsInjuryPickerOpen(false)}
-                          className="text-xs font-black text-stone-500 hover:text-stone-800 px-2 py-0.5 rounded-lg"
-                        >
-                          ✕
-                        </button>
+                          <p className="text-sm font-extrabold text-white truncate mt-0.5">
+                            {pricing.titleStr}
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-base font-black text-[#D4AF37] block">
+                            {formatRupiah(pricing.subtotal)}
+                          </span>
+                          <span className="text-xs font-extrabold text-emerald-300">
+                            +{pricing.pts} Poin
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {ANATOMY_LOCATIONS.map((loc) => {
-                          const isLocActive = chosenInjurySpot === loc;
-                          return (
-                            <button
-                              key={loc}
-                              type="button"
-                              onClick={() => {
-                                setChosenInjurySpot(loc);
-                                setIsInjuryPickerOpen(false);
-                              }}
-                              className={`tactile-btn text-xs font-extrabold px-3 py-2 rounded-xl border transition ${
-                                isLocActive
-                                  ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C] shadow-xs'
-                                  : 'bg-white text-stone-800 border-stone-300 hover:bg-stone-50'
-                              }`}
-                            >
-                              {loc}
-                            </button>
-                          );
-                        })}
-                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleGoToStep2}
+                        className="tactile-btn gold-shimmer-card w-full min-h-[46px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl shadow-md border border-amber-200 text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition"
+                      >
+                        <span>Lanjut Jadwal & Pembayaran</span>
+                        <i className="fa-solid fa-arrow-right"></i>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-stone-100 text-stone-600 p-3 rounded-2xl border border-stone-200 text-center text-xs font-bold">
+                      Pilih minimal 1 layanan di atas untuk memunculkan tombol lanjut pembayaran
                     </div>
                   )}
-
-                {/* Footer Ringkasan Langkah 1 & Tombol Lanjut Pilih Jadwal */}
-                <div className="pt-3 border-t border-stone-200 space-y-2.5">
-                  {((serviceMode === 'single' && chosenSingleIds.length > 0) ||
-                    (serviceMode === 'package' && Boolean(chosenPackageId))) && (
-                    <div className="bg-[#0B261C] text-white p-3.5 rounded-2xl flex justify-between items-center border border-[#D4AF37]/50 shadow-sm">
-                      <div className="min-w-0 flex-1 pr-2">
-                        <span className="text-xs text-emerald-300 font-bold block">
-                          Layanan Dipilih (
-                          {serviceMode === 'single'
-                            ? `${chosenSingleIds.length} Layanan`
-                            : '1 Paket'}
-                          ):
-                        </span>
-                        <p className="text-sm font-extrabold text-white truncate mt-0.5">
-                          {pricing.titleStr}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <span className="text-base font-black text-[#D4AF37] block">
-                          {formatRupiah(pricing.subtotal)}
-                        </span>
-                        <span className="text-xs font-extrabold text-emerald-300">
-                          +{pricing.pts} Poin
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleGoToStep2}
-                    disabled={
-                      (serviceMode === 'single' && chosenSingleIds.length === 0) ||
-                      (serviceMode === 'package' && !chosenPackageId)
-                    }
-                    className={`tactile-btn w-full min-h-[50px] font-black py-3.5 px-5 rounded-2xl shadow-md border text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition ${
-                      (serviceMode === 'single' && chosenSingleIds.length === 0) ||
-                      (serviceMode === 'package' && !chosenPackageId)
-                        ? 'bg-stone-200 text-stone-500 border-stone-300 cursor-not-allowed'
-                        : 'gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] border-amber-200'
-                    }`}
-                  >
-                    <span>
-                      {(serviceMode === 'single' && chosenSingleIds.length === 0) ||
-                      (serviceMode === 'package' && !chosenPackageId)
-                        ? 'Pilih Layanan Terlebih Dahulu'
-                        : 'Lanjut ke Pilih Jadwal'}
-                    </span>
-                    <i className="fa-solid fa-arrow-right"></i>
-                  </button>
                 </div>
               </div>
             </div>
@@ -1519,25 +1605,43 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   })}
                 </div>
 
-                {/* Tombol Navigasi Bawah Langkah 2 */}
-                <div className="pt-3 border-t border-stone-200 flex gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => goToStep(1)}
-                    className="tactile-btn min-h-[50px] bg-stone-100 hover:bg-stone-200 text-stone-800 font-black py-3.5 px-4 rounded-2xl text-sm border border-stone-300 flex items-center justify-center gap-1.5"
+                {/* Tombol Navigasi Bawah Langkah 2 (Sticky Saat Jam Sesi Dipilih) */}
+                <div
+                  className={
+                    selectedTimeSlot
+                      ? 'sticky bottom-[62px] z-30 pt-2'
+                      : 'pt-3 border-t border-stone-200'
+                  }
+                >
+                  <div
+                    className={`flex gap-2.5 ${
+                      selectedTimeSlot
+                        ? 'bg-[#0B261C]/95 backdrop-blur-md p-2.5 rounded-2xl border-2 border-[#D4AF37] shadow-[0_12px_32px_rgba(0,0,0,0.45)]'
+                        : ''
+                    }`}
                   >
-                    <i className="fa-solid fa-arrow-left"></i>
-                    <span>Kembali</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => goToStep(1)}
+                      className="tactile-btn min-h-[46px] bg-stone-100 hover:bg-stone-200 text-stone-800 font-black py-2.5 px-4 rounded-xl text-xs sm:text-sm border border-stone-300 flex items-center justify-center gap-1.5"
+                    >
+                      <i className="fa-solid fa-arrow-left"></i>
+                      <span>Kembali</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={handleGoToStep3}
-                    className="tactile-btn gold-shimmer-card flex-1 min-h-[50px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3.5 px-5 rounded-2xl shadow-md border border-amber-200 text-sm uppercase tracking-wider flex items-center justify-center gap-2"
-                  >
-                    <span>Lanjut ke Pembayaran</span>
-                    <i className="fa-solid fa-arrow-right"></i>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleGoToStep3}
+                      className="tactile-btn gold-shimmer-card flex-1 min-h-[46px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl shadow-md border border-amber-200 text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+                    >
+                      <span>
+                        {selectedTimeSlot
+                          ? `Lanjut Pembayaran (${selectedTimeSlot})`
+                          : 'Lanjut ke Pembayaran'}
+                      </span>
+                      <i className="fa-solid fa-arrow-right"></i>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

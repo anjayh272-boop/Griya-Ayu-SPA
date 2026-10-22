@@ -74,11 +74,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Cek Akun Admin Utama: 085183110392 // RISMAWATI (tersinkron global di Cloud)
+    // Cek Akun Admin Utama: 087765573476 // RISMAWATI (tersinkron global di Cloud)
     let savedAdmin: User | null =
       adminProfile || safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
 
-    if (cleanPhone === '085183110392' || cleanPhone === '081585921993') {
+    if (cleanPhone === '087765573476' || cleanPhone === '081585921993') {
       const cloudSettings = await fetchSpaSettingsFromCloud();
       if (cloudSettings?.adminProfile) {
         savedAdmin = cloudSettings.adminProfile;
@@ -88,7 +88,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     const expectedAdminPass = savedAdmin?.pass || 'RISMAWATI';
 
     const isMainAdmin =
-      cleanPhone === '085183110392' &&
+      cleanPhone === '087765573476' &&
       (cleanPass.toUpperCase() === expectedAdminPass.toUpperCase() ||
         cleanPass === expectedAdminPass ||
         cleanPass.toUpperCase() === 'RISMAWATI');
@@ -99,19 +99,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         cleanPass.toUpperCase() === 'RISMAWATI');
 
     if (isMainAdmin || isSecondaryAdmin) {
-      const adminUser: User = savedAdmin || {
-        name: 'Rismawati (Admin)',
-        phone: cleanPhone,
-        pass: cleanPass,
-        points: 999,
-        role: 'admin',
-      };
+      const adminUser: User = savedAdmin
+        ? {
+            ...savedAdmin,
+            phone: isMainAdmin ? '087765573476' : cleanPhone,
+          }
+        : {
+            name: 'Rismawati (Admin)',
+            phone: cleanPhone,
+            pass: cleanPass,
+            points: 999,
+            role: 'admin',
+          };
       onLoginSuccess(adminUser, true);
       return;
     }
 
     // Jika nomor admin tapi sandi salah
-    if (cleanPhone === '085183110392' || cleanPhone === '081585921993') {
+    if (cleanPhone === '087765573476' || cleanPhone === '081585921993') {
       onShowToast(
         'Kata Sandi Admin Salah',
         'Kata sandi untuk akun Admin tidak sesuai. Silakan periksa kembali kata sandi Anda.'
@@ -190,7 +195,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    if (cleanPhone === '085183110392' || cleanPhone === '081585921993') {
+    if (cleanPhone === '087765573476' || cleanPhone === '081585921993') {
       onShowToast(
         'Nomor Khusus Admin',
         'Nomor ini adalah nomor khusus Admin. Silakan masuk melalui tab Login.'
@@ -238,7 +243,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     onShowToast(
       'Bantuan Reset Kata Sandi',
       'Untuk bantuan mereset kata sandi akun member Griya Ayu Anda, silakan hubungi Admin Rismawati melalui WhatsApp.',
-      'https://wa.me/6285183110392?text=Halo%20Admin%20Griya%20Ayu%2C%20saya%20ingin%20bantuan%20reset%20kata%20sandi%20akun%20member%20saya.'
+      'https://wa.me/6287765573476?text=Halo%20Admin%20Griya%20Ayu%2C%20saya%20ingin%20bantuan%20reset%20kata%20sandi%20akun%20member%20saya.'
     );
   };
 

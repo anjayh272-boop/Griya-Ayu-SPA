@@ -252,38 +252,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div className="flex-1 flex flex-col pb-28">
       {/* HEADER DASHBOARD ADMIN RISMAWATI */}
-      <header className="bg-gradient-to-r from-stone-900 via-[#0B261C] to-stone-900 text-white px-4 py-4 rounded-b-3xl shadow-lg border-b-2 border-[#D4AF37]">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            {currentUser.avatar ? (
-              <img
-                src={currentUser.avatar}
-                alt={currentUser.name}
-                className="w-11 h-11 rounded-full object-cover border-2 border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.35)]"
-              />
-            ) : (
-              <GriyaAyuLogo size="sm" showBadge={false} floating={false} />
-            )}
-            <div>
-              <span className="text-[8px] font-black uppercase tracking-widest bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded">
+      <header className="bg-gradient-to-r from-stone-900 via-[#0B261C] to-stone-900 text-white px-4 py-3.5 rounded-b-3xl shadow-lg border-b-2 border-[#D4AF37]">
+        <div className="flex justify-between items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="flex-shrink-0">
+              {currentUser.avatar ? (
+                <img
+                  src={currentUser.avatar}
+                  alt={currentUser.name}
+                  className="w-11 h-11 rounded-full object-cover border-2 border-[#D4AF37] shadow-[0_0_20px_rgba(212,175,55,0.35)]"
+                />
+              ) : (
+                <GriyaAyuLogo size="sm" showBadge={false} floating={false} />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] font-black uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded inline-block max-w-full truncate">
                 {isEn ? 'OFFICIAL ADMIN PANEL' : 'DASHBOARD ADMIN RESMI'}
               </span>
-              <h1 className="text-sm font-black text-white mt-0.5">{currentUser.name}</h1>
-              <p className="text-[10px] text-emerald-200">WA Admin: 0851-8311-0392</p>
+              <h1 className="text-sm sm:text-base font-black text-white truncate mt-0.5 leading-tight">
+                {currentUser.name}
+              </h1>
+              <p className="text-xs text-emerald-200 font-semibold truncate mt-0.5">
+                WA Admin: 0877-6557-3476
+              </p>
             </div>
           </div>
 
           {/* Kanan Atas: Lonceng Bar Notifikasi Admin + Akun Admin */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <button
               type="button"
               onClick={handleOpenNotifTab}
               aria-label="Buka Bar Notifikasi & Bot Promo Admin"
-              className="tactile-btn relative w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 border border-[#D4AF37]/50 text-[#D4AF37] flex items-center justify-center"
+              className="tactile-btn relative w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 border border-[#D4AF37]/50 text-[#D4AF37] flex items-center justify-center flex-shrink-0"
             >
               <i className="fa-solid fa-bell text-xs"></i>
               {unreadAdminNotifs > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-black flex items-center justify-center animate-pulse">
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center animate-pulse">
                   {unreadAdminNotifs}
                 </span>
               )}
@@ -293,7 +299,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               type="button"
               onClick={() => setAdminSubTab('account')}
               aria-label="Buka Pengaturan Akun Admin"
-              className="tactile-btn bg-white/10 hover:bg-white/20 text-[10px] font-bold px-2.5 py-2 rounded-xl border border-[#D4AF37]/50 transition flex items-center gap-1"
+              className="tactile-btn bg-white/10 hover:bg-white/20 text-[11px] font-bold px-2.5 py-2 rounded-xl border border-[#D4AF37]/50 transition flex items-center gap-1 flex-shrink-0 whitespace-nowrap"
             >
               <i className="fa-solid fa-user-gear text-amber-300"></i>
               <span>{isEn ? 'Account' : 'Akun'}</span>
@@ -305,57 +311,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Konten Utama Admin */}
       <div className="p-3.5 space-y-3.5 flex-1">
         {/* Sub-Tab Navigation Bar (4 Tab Admin) */}
-        <div className="grid grid-cols-4 gap-1 bg-stone-200 p-1 rounded-2xl text-[10px] font-black">
+        <div className="grid grid-cols-4 gap-1 bg-stone-200 p-1 rounded-2xl text-[11px] font-black">
           <button
             type="button"
             onClick={() => setAdminSubTab('orders')}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 transition ${
               adminSubTab === 'orders'
                 ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-600 hover:text-stone-900'
+                : 'text-stone-700 hover:text-stone-900'
             }`}
           >
-            <i className="fa-solid fa-clipboard-check"></i>
-            <span>Pesanan ({bookings.length})</span>
+            <i className="fa-solid fa-clipboard-check flex-shrink-0"></i>
+            <span className="truncate">Pesanan ({bookings.length})</span>
           </button>
           <button
             type="button"
             onClick={handleOpenNotifTab}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 relative transition ${
+            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 relative transition ${
               adminSubTab === 'notifications'
                 ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-600 hover:text-stone-900'
+                : 'text-stone-700 hover:text-stone-900'
             }`}
           >
-            <i className="fa-solid fa-bullhorn"></i>
-            <span>Notif & Bot</span>
+            <i className="fa-solid fa-bullhorn flex-shrink-0"></i>
+            <span className="truncate">Notif & Bot</span>
             {unreadAdminNotifs > 0 && (
-              <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
+              <span className="w-2 h-2 rounded-full bg-red-500 inline-block flex-shrink-0"></span>
             )}
           </button>
           <button
             type="button"
             onClick={() => setAdminSubTab('schedule')}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 transition ${
               adminSubTab === 'schedule'
                 ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-600 hover:text-stone-900'
+                : 'text-stone-700 hover:text-stone-900'
             }`}
           >
-            <i className="fa-solid fa-sliders"></i>
-            <span>Atur Jam</span>
+            <i className="fa-solid fa-sliders flex-shrink-0"></i>
+            <span className="truncate">Atur Jam</span>
           </button>
           <button
             type="button"
             onClick={() => setAdminSubTab('account')}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 transition ${
               adminSubTab === 'account'
                 ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-600 hover:text-stone-900'
+                : 'text-stone-700 hover:text-stone-900'
             }`}
           >
-            <i className="fa-solid fa-user-shield"></i>
-            <span>Akun</span>
+            <i className="fa-solid fa-user-shield flex-shrink-0"></i>
+            <span className="truncate">Akun</span>
           </button>
         </div>
 
@@ -366,19 +372,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="space-y-3 animate-page-enter">
             {/* Penanda Khusus / Alert jika ada pesanan yang Menunggu Cek Refund Admin */}
             {refundPendingCount > 0 && (
-              <div className="bg-amber-50 border-2 border-amber-400 p-3.5 rounded-2xl shadow-xs flex items-center justify-between gap-2.5">
-                <div className="flex items-start gap-2.5">
+              <div className="bg-amber-50 border-2 border-amber-400 p-3.5 rounded-2xl shadow-xs flex items-center justify-between gap-2.5 flex-wrap sm:flex-nowrap">
+                <div className="flex items-start gap-2.5 min-w-0 flex-1">
                   <div className="w-9 h-9 rounded-xl bg-amber-500 text-stone-950 flex items-center justify-center text-sm font-black flex-shrink-0 animate-pulse">
                     <i className="fa-solid fa-rotate-left"></i>
                   </div>
-                  <div>
-                    <span className="text-[9px] font-black uppercase bg-amber-200 text-amber-950 px-2 py-0.5 rounded">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] font-black uppercase bg-amber-200 text-amber-950 px-2 py-0.5 rounded inline-block">
                       Perlu Verifikasi Admin
                     </span>
-                    <h3 className="text-xs font-black text-[#0B261C] mt-0.5">
+                    <h3 className="text-xs sm:text-sm font-black text-[#0B261C] mt-0.5 leading-snug">
                       {refundPendingCount} Pesanan Menunggu Cek Refund Admin
                     </h3>
-                    <p className="text-[10px] text-stone-600 leading-snug">
+                    <p className="text-xs text-stone-600 leading-snug mt-0.5">
                       Cek alasan batal, rekening tujuan, dan foto bukti transfer/QRIS di bawah.
                     </p>
                   </div>
@@ -388,7 +394,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   onClick={() =>
                     setOrderFilter(orderFilter === 'refund_pending' ? 'all' : 'refund_pending')
                   }
-                  className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black px-3 py-2 rounded-xl text-[10px] whitespace-nowrap shadow-xs"
+                  className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black px-3 py-2 rounded-xl text-xs whitespace-nowrap shadow-xs flex-shrink-0"
                 >
                   {orderFilter === 'refund_pending' ? 'Lihat Semua' : 'Filter Refund'}
                 </button>
@@ -396,14 +402,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
 
             {/* Filter Tab Kelola Pesanan */}
-            <div className="grid grid-cols-4 gap-1 bg-white p-1 rounded-2xl border border-stone-200 text-[10px] font-black shadow-2xs">
+            <div className="grid grid-cols-4 gap-1 bg-white p-1 rounded-2xl border border-stone-200 text-[11px] font-black shadow-2xs">
               <button
                 type="button"
                 onClick={() => setOrderFilter('all')}
-                className={`py-2 px-1 rounded-xl transition ${
+                className={`py-2 px-1 rounded-xl transition truncate ${
                   orderFilter === 'all'
                     ? 'bg-[#0B261C] text-[#D4AF37]'
-                    : 'text-stone-600 hover:text-stone-900'
+                    : 'text-stone-700 hover:text-stone-900'
                 }`}
               >
                 Semua ({bookings.length})
@@ -411,26 +417,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setOrderFilter('refund_pending')}
-                className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1 ${
+                className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1 min-w-0 ${
                   orderFilter === 'refund_pending'
                     ? 'bg-amber-500 text-stone-950'
                     : refundPendingCount > 0
                     ? 'bg-amber-50 text-amber-900 border border-amber-300'
-                    : 'text-stone-600 hover:text-stone-900'
+                    : 'text-stone-700 hover:text-stone-900'
                 }`}
               >
-                <span>Cek Refund</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-black/15 text-[9px]">
+                <span className="truncate">Refund</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-black/15 text-[10px] flex-shrink-0">
                   {refundPendingCount}
                 </span>
               </button>
               <button
                 type="button"
                 onClick={() => setOrderFilter('active')}
-                className={`py-2 px-1 rounded-xl transition ${
+                className={`py-2 px-1 rounded-xl transition truncate ${
                   orderFilter === 'active'
                     ? 'bg-[#0B261C] text-[#D4AF37]'
-                    : 'text-stone-600 hover:text-stone-900'
+                    : 'text-stone-700 hover:text-stone-900'
                 }`}
               >
                 Aktif / Lunas
@@ -438,27 +444,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="button"
                 onClick={() => setOrderFilter('refund_done')}
-                className={`py-2 px-1 rounded-xl transition ${
+                className={`py-2 px-1 rounded-xl transition truncate ${
                   orderFilter === 'refund_done'
                     ? 'bg-[#0B261C] text-[#D4AF37]'
-                    : 'text-stone-600 hover:text-stone-900'
+                    : 'text-stone-700 hover:text-stone-900'
                 }`}
               >
                 Batal / Refund
               </button>
             </div>
 
-            <div className="flex justify-between items-center px-1">
-              <h2 className="text-[11px] font-black uppercase tracking-wider text-stone-700">
+            <div className="flex justify-between items-center gap-2 px-1 flex-wrap">
+              <h2 className="text-xs font-black uppercase tracking-wider text-stone-800">
                 Kelola Pesanan & Pengelolaan Refund
               </h2>
-              <span className="text-[10px] font-bold text-emerald-800">
+              <span className="text-[11px] font-bold text-emerald-800">
                 Batal / Refund = Jam Terbuka Kembali
               </span>
             </div>
 
             {filteredBookings.length === 0 ? (
-              <div className="bg-white p-6 rounded-2xl border border-stone-200 text-center text-stone-500 text-xs">
+              <div className="bg-white p-6 rounded-2xl border border-stone-200 text-center text-stone-500 text-sm font-medium">
                 Tidak ada pesanan pada filter ini.
               </div>
             ) : (
@@ -500,88 +506,99 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         : 'border-amber-300 bg-amber-50/30'
                     }`}
                   >
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-black text-[#0B261C]">{b.customer}</span>
-                          <span className="text-[10px] text-stone-500 font-mono">({b.wa})</span>
-                        </div>
-                        <h3 className="font-extrabold text-xs text-stone-800 mt-0.5">{b.items}</h3>
-                        <p className="text-[10px] text-stone-500 mt-0.5">
-                          <i className="fa-regular fa-calendar mr-1"></i>
-                          <b>{b.datePretty}</b> • Jam{' '}
-                          <b className="text-emerald-900">{b.time} WIB</b>
-                        </p>
-                      </div>
+                    {/* Baris Atas: ID Pesanan & Status Pembayaran / Verifikasi / Refund Badge (Tidak Tabrakan) */}
+                    <div className="flex flex-wrap justify-between items-center gap-2 pb-2 border-b border-stone-200/80">
+                      <span className="font-mono text-xs font-black text-stone-500">
+                        #GA-{String(b.id).slice(-6)}
+                      </span>
 
-                      {/* Status Pembayaran / Verifikasi / Refund Badge */}
-                      <div className="text-right space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         {isRefundWaiting ? (
-                          <span className="text-[9px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1 whitespace-nowrap animate-pulse">
+                          <span className="text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1 animate-pulse">
                             <i className="fa-solid fa-clock-rotate-left text-amber-700"></i>
                             <span>MENUNGGU CEK REFUND ADMIN</span>
                           </span>
                         ) : isRefundDone ? (
-                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-400 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-400 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
                             <i className="fa-solid fa-circle-check text-emerald-700"></i>
                             <span>
                               {b.status === 'Refund_Completed' ? 'REFUND SELESAI' : 'DIBATALKAN'}
                             </span>
                           </span>
                         ) : isConfirmedAcc ? (
-                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-500 px-2.5 py-1 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-500 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
                             <i className="fa-solid fa-circle-check text-emerald-600"></i>
                             <span>TERKONFIRMASI (ACC ADMIN)</span>
                           </span>
                         ) : isWaitingVerify ? (
-                          <span className="text-[9px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1 whitespace-nowrap animate-pulse">
+                          <span className="text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1 animate-pulse">
                             <i className="fa-solid fa-hourglass-half text-amber-700"></i>
                             <span>MENUNGGU VERIFIKASI ADMIN</span>
                           </span>
                         ) : isCashOrder && isPaid ? (
-                          <span className="text-[9px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
-                            <span>💵 BOOKING CASH (BAYAR DI LOKASI)</span>
+                          <span className="text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+                            <span>💵 BOOKING CASH (DI LOKASI)</span>
                           </span>
                         ) : isPaid ? (
-                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-400 px-2 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-400 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
                             <i className="fa-solid fa-circle-check text-emerald-600"></i> BAYAR BERHASIL
                           </span>
                         ) : isFailed ? (
-                          <span className="text-[9px] font-black bg-red-100 text-red-800 border border-red-300 px-2 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
+                          <span className="text-[10px] font-black bg-red-100 text-red-800 border border-red-300 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
                             <i className="fa-solid fa-circle-xmark text-red-600"></i> GAGAL
                           </span>
                         ) : (
-                          <span className="text-[9px] font-black bg-amber-100 text-amber-900 border border-amber-400 px-2 py-0.5 rounded-full block whitespace-nowrap">
+                          <span className="text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-400 px-2.5 py-0.5 rounded-full inline-block">
                             ⏳ PENDING (20m)
                           </span>
                         )}
 
                         {isCompleted && (
-                          <span className="text-[8px] font-black bg-[#0B261C] text-[#D4AF37] px-2 py-0.5 rounded-full block">
+                          <span className="text-[10px] font-black bg-[#0B261C] text-[#D4AF37] px-2.5 py-0.5 rounded-full inline-block">
                             ✓ Selesai (+{b.ptsEarned} Pts)
                           </span>
                         )}
                       </div>
                     </div>
 
+                    {/* Detail Pelanggan, Layanan, & Jadwal (Ukuran Font Jelas & Mudah Dibaca) */}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm font-black text-[#0B261C]">{b.customer}</span>
+                        <span className="text-xs text-stone-600 font-mono font-semibold">
+                          ({b.wa})
+                        </span>
+                      </div>
+                      <h3 className="font-extrabold text-sm text-stone-900 leading-snug">
+                        {b.items}
+                      </h3>
+                      <p className="text-xs text-stone-600 pt-0.5">
+                        <i className="fa-regular fa-calendar mr-1.5 text-emerald-800"></i>
+                        <b>{b.datePretty}</b> • Jam{' '}
+                        <b className="text-emerald-900 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                          {b.time} WIB
+                        </b>
+                      </p>
+                    </div>
+
                     {/* Info Metode Pembayaran, Bukti Transfer/QRIS atau Keterangan Cash, & Struk */}
-                    <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 space-y-2 text-xs">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <p className="text-[10px] text-stone-600 font-bold">{b.payMethod}</p>
+                    <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 space-y-2 text-xs">
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-stone-700 font-bold truncate">{b.payMethod}</p>
                           {b.vaNumber && (
-                            <p className="text-[9px] font-mono text-stone-500">
+                            <p className="text-[11px] font-mono text-stone-500 truncate">
                               ID/VA: {b.vaNumber}
                             </p>
                           )}
-                          <p className="font-black text-emerald-950 text-xs mt-0.5">
+                          <p className="font-black text-emerald-950 text-sm mt-0.5">
                             {formatRupiah(b.total)}
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => onViewReceipt(b)}
-                          className="tactile-btn bg-white hover:bg-stone-100 text-[#0B261C] border border-stone-300 font-extrabold px-2.5 py-1.5 rounded-xl text-[10px] shadow-xs flex items-center gap-1"
+                          className="tactile-btn bg-white hover:bg-stone-100 text-[#0B261C] border border-stone-300 font-extrabold px-3 py-2 rounded-xl text-xs shadow-xs flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
                         >
                           <i className="fa-solid fa-receipt text-amber-600"></i>
                           <span>Lihat Struk</span>
@@ -590,23 +607,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       {/* TAMPILAN BUKTI PEMBAYARAN (QRIS/TRANSFER) ATAU KETERANGAN CASH DI TEMPAT */}
                       {isCashOrder ? (
-                        <div className="bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-2 flex items-center justify-between gap-2 text-[10px] font-black text-amber-950">
+                        <div className="bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-2 flex items-center justify-between gap-2 flex-wrap text-xs font-black text-amber-950">
                           <span>💵 Bayar di Tempat (Cash)</span>
-                          <span className="text-[9px] font-bold text-amber-800 bg-amber-200/70 px-2 py-0.5 rounded">
+                          <span className="text-[10px] font-bold text-amber-800 bg-amber-200/70 px-2 py-0.5 rounded">
                             Dibayar di Kasir Saat Kedatangan
                           </span>
                         </div>
                       ) : b.paymentProofImage ? (
-                        <div className="bg-white p-2 rounded-xl border border-emerald-200 space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] font-black text-[#0B261C] flex items-center gap-1">
+                        <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
+                          <div className="flex justify-between items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-[#0B261C] flex items-center gap-1">
                               <i className="fa-solid fa-image text-emerald-700"></i>
                               <span>Bukti Transfer / QRIS Pelanggan:</span>
                             </span>
                             <button
                               type="button"
                               onClick={() => setPreviewProofOrder(b)}
-                              className="text-[10px] font-black text-emerald-800 underline"
+                              className="text-xs font-black text-emerald-800 underline"
                             >
                               Perbesar Foto Bukti
                             </button>
@@ -620,13 +637,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               alt={`Bukti Bayar ${b.customer}`}
                               className="w-full h-full object-contain"
                             />
-                            <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[9px] font-bold px-2 py-0.5 rounded">
+                            <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] font-bold px-2 py-0.5 rounded">
                               🔍 Klik untuk Perbesar Bukti
                             </span>
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 text-[10px] text-stone-600 flex items-center justify-between">
+                        <div className="bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs text-stone-600 flex items-center justify-between gap-2">
                           <span>Metode: QRIS / Transfer Bank</span>
                           <span className="font-bold text-emerald-800">Cek Mutasi / Struk</span>
                         </div>
@@ -834,8 +851,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {/* ========================================================= */}
                     {isPaid && !isRefundWaiting && !isRefundDone && (
                       <div className="bg-emerald-50/90 p-3 rounded-2xl border border-emerald-300 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-black text-emerald-950 flex items-center gap-1.5">
+                        <div className="flex justify-between items-center gap-2 flex-wrap">
+                          <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                             <i className="fa-solid fa-user-check text-emerald-700 text-xs"></i>
                             <span>
                               {isConfirmedAcc
@@ -848,7 +865,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onClick={() =>
                               setExpandedConfirmOrderId(isConfirmOpen ? null : b.id)
                             }
-                            className="text-[9px] font-extrabold text-emerald-800 underline"
+                            className="text-[11px] font-extrabold text-emerald-800 underline flex-shrink-0"
                           >
                             {isConfirmOpen ? 'Tutup Teks WA' : 'Preview Teks WA'}
                           </button>
@@ -856,7 +873,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                         {isConfirmOpen && (
                           <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
-                            <p className="text-[10px] text-stone-700 whitespace-pre-line leading-relaxed font-medium">
+                            <p className="text-xs text-stone-700 whitespace-pre-line leading-relaxed font-medium">
                               {confirmMsg.text}
                             </p>
                             <button
@@ -864,7 +881,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               onClick={() =>
                                 onCopyText(confirmMsg.text, 'Kata-kata Verifikasi ACC WA Pelanggan')
                               }
-                              className="tactile-btn w-full bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold py-1.5 rounded-lg text-[10px]"
+                              className="tactile-btn w-full bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold py-2 rounded-lg text-xs"
                             >
                               <i className="fa-regular fa-copy mr-1"></i>
                               Salin Teks Verifikasi WA
@@ -878,14 +895,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={() => onVerifyPayment(b.id)}
-                            className="tactile-btn gold-shimmer-card w-full min-h-[42px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-300 shadow-sm flex items-center justify-center gap-2 text-center"
+                            className="tactile-btn gold-shimmer-card w-full min-h-[44px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-300 shadow-sm flex items-center justify-center gap-2 text-center"
                           >
                             <i className="fa-solid fa-circle-check text-emerald-900 text-sm"></i>
                             <span>ACC / Verifikasi Pesanan</span>
                           </a>
                         ) : (
-                          <div className="flex items-center justify-between gap-2 bg-emerald-100/90 border border-emerald-300 rounded-xl px-2.5 py-2">
-                            <span className="text-[10px] font-black text-emerald-950 flex items-center gap-1">
+                          <div className="flex items-center justify-between gap-2 flex-wrap bg-emerald-100/90 border border-emerald-300 rounded-xl px-3 py-2">
+                            <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                               <i className="fa-solid fa-circle-check text-emerald-600"></i>
                               <span>Terkonfirmasi (ACC Admin)</span>
                             </span>
@@ -893,7 +910,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               href={confirmMsg.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="tactile-btn bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-1.5 px-2.5 rounded-lg text-[10px] flex items-center gap-1 shadow-2xs"
+                              className="tactile-btn bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-1.5 px-3 rounded-lg text-xs flex items-center gap-1 shadow-2xs"
                             >
                               <i className="fa-brands fa-whatsapp"></i>
                               <span>Kirim WA ACC</span>
@@ -910,13 +927,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button
                             type="button"
                             onClick={() => onCompleteTreatment(b.id)}
-                            className="tactile-btn gold-shimmer-card w-full bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-2 rounded-xl text-[11px] border border-[#D4AF37]/50 shadow-xs flex items-center justify-center gap-1.5"
+                            className="tactile-btn gold-shimmer-card w-full bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-2.5 rounded-xl text-xs border border-[#D4AF37]/50 shadow-xs flex items-center justify-center gap-1.5"
                           >
                             <i className="fa-solid fa-crown text-amber-400"></i>
                             <span>Selesai Treatment & Kirim +{b.ptsEarned} Poin</span>
                           </button>
                         ) : (
-                          <div className="text-center text-[10px] font-bold text-emerald-800 bg-emerald-50 py-1.5 rounded-xl border border-emerald-200">
+                          <div className="text-center text-xs font-bold text-emerald-800 bg-emerald-50 py-2 rounded-xl border border-emerald-200">
                             ✓ Treatment Selesai • +{b.ptsEarned} Poin Telah Masuk ke Akun Member
                           </div>
                         )}
@@ -990,36 +1007,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               onSubmit={handleRunPromoBot}
               className="bg-gradient-to-b from-[#0B261C] to-[#123829] text-white p-4 rounded-2xl border-2 border-[#D4AF37] shadow-lg space-y-3"
             >
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="text-[9px] font-black uppercase tracking-wider bg-[#D4AF37] text-[#0B261C] px-2 py-0.5 rounded inline-flex items-center gap-1">
+              <div className="flex justify-between items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-[#D4AF37] text-[#0B261C] px-2 py-0.5 rounded inline-flex items-center gap-1">
                     <i className="fa-solid fa-robot"></i> WA BLAST BOT OTOMATIS
                   </span>
-                  <h2 className="text-xs font-black text-white mt-1">
+                  <h2 className="text-sm font-black text-white mt-1 leading-snug">
                     Share Promo Griya Ayu ke Semua WA Pelanggan
                   </h2>
-                  <p className="text-[10px] text-emerald-200">
+                  <p className="text-xs text-emerald-200 mt-0.5 leading-snug">
                     Kirim promo berupa <b>Teks & Gambar</b> otomatis ke seluruh nomor WA member &
                     bar notifikasi pelanggan.
                   </p>
                 </div>
-                <span className="text-[10px] font-black bg-white/10 text-amber-300 px-2 py-1 rounded-lg border border-amber-400/30">
+                <span className="text-xs font-black bg-white/10 text-amber-300 px-2.5 py-1 rounded-lg border border-amber-400/30 flex-shrink-0 whitespace-nowrap">
                   {storedCustomers.length} Member
                 </span>
               </div>
 
               {/* Pilih Cepat Template Promo Menarik */}
               <div>
-                <span className="text-[10px] font-bold text-amber-200 block mb-1">
+                <span className="text-xs font-bold text-amber-200 block mb-1.5">
                   Pilih Cepat Template Promo:
                 </span>
-                <div className="grid grid-cols-3 gap-1.5 text-[9px] font-black">
+                <div className="grid grid-cols-3 gap-1.5 text-xs font-black">
                   {PROMO_TEMPLATES.map((tpl, i) => (
                     <button
                       key={tpl.id}
                       type="button"
                       onClick={() => handleSelectPromoPreset(tpl)}
-                      className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-200 border border-white/20 py-1.5 px-2 rounded-xl truncate"
+                      className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-200 border border-white/20 py-2 px-2 rounded-xl truncate"
                     >
                       🔥 Promo #{i + 1}
                     </button>
@@ -1028,9 +1045,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               {/* Preview & Upload Gambar Promo */}
-              <div className="bg-black/30 p-2.5 rounded-xl border border-white/15 space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-black text-[#D4AF37]">
+              <div className="bg-black/30 p-3 rounded-xl border border-white/15 space-y-2">
+                <div className="flex justify-between items-center gap-2 flex-wrap">
+                  <span className="text-xs font-black text-[#D4AF37]">
                     1. Gambar / Poster Promo:
                   </span>
                   <input
@@ -1042,7 +1059,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   />
                   <label
                     htmlFor="promoImageUploadInput"
-                    className="tactile-btn bg-[#D4AF37] text-[#0B261C] text-[9px] font-black px-2.5 py-1 rounded-lg cursor-pointer"
+                    className="tactile-btn bg-[#D4AF37] text-[#0B261C] text-[11px] font-black px-3 py-1.5 rounded-lg cursor-pointer"
                   >
                     <i className="fa-solid fa-image mr-1"></i>Upload Gambar Promo
                   </label>
@@ -1055,7 +1072,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       alt="Preview Gambar Promo"
                       className="w-full h-full object-cover"
                     />
-                    <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-amber-300 text-[9px] font-black px-2 py-0.5 rounded">
+                    <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded">
                       Kode: {promoCode}
                     </span>
                   </div>
@@ -1067,7 +1084,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="col-span-2">
                   <label
                     htmlFor="promoTitleInput"
-                    className="text-[10px] font-black text-amber-200 block mb-1"
+                    className="text-xs font-black text-amber-200 block mb-1"
                   >
                     2. Judul Promo:
                   </label>
@@ -1076,13 +1093,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     type="text"
                     value={promoTitle}
                     onChange={(e) => setPromoTitle(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-white text-stone-900 text-xs font-bold"
+                    className="w-full px-3 py-2 rounded-xl bg-white text-stone-900 text-xs font-bold"
                   />
                 </div>
                 <div>
                   <label
                     htmlFor="promoCodeInput"
-                    className="text-[10px] font-black text-amber-200 block mb-1"
+                    className="text-xs font-black text-amber-200 block mb-1"
                   >
                     Kode Promo:
                   </label>
@@ -1091,7 +1108,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     type="text"
                     value={promoCode}
                     onChange={(e) => setPromoCode(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-white text-stone-900 text-xs font-mono font-bold"
+                    className="w-full px-3 py-2 rounded-xl bg-white text-stone-900 text-xs font-mono font-bold"
                   />
                 </div>
               </div>
@@ -1100,7 +1117,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div>
                 <label
                   htmlFor="promoMessageInput"
-                  className="text-[10px] font-black text-amber-200 block mb-1"
+                  className="text-xs font-black text-amber-200 block mb-1"
                 >
                   3. Kata-Kata Teks Promo (Otomatis Dikirim ke WA Pelanggan):
                 </label>
@@ -1109,16 +1126,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   rows={4}
                   value={promoMessage}
                   onChange={(e) => setPromoMessage(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-white text-stone-900 text-[11px] font-medium leading-relaxed"
+                  className="w-full p-3 rounded-xl bg-white text-stone-900 text-xs font-medium leading-relaxed"
                 />
               </div>
 
               {/* Status Pengiriman Bot Otomatis ke Semua Nomor WA Pelanggan */}
-              <div className="bg-black/35 p-2.5 rounded-xl border border-white/10 space-y-1.5">
-                <span className="text-[10px] font-black text-emerald-300 block">
+              <div className="bg-black/35 p-3 rounded-xl border border-white/10 space-y-2">
+                <span className="text-xs font-black text-emerald-300 block">
                   Daftar Target Bot WA Pelanggan ({storedCustomers.length} Nomor Aktif):
                 </span>
-                <div className="space-y-1 max-h-28 overflow-y-auto">
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
                   {storedCustomers.map((c) => {
                     const isSent = botSentList.includes(c.phone);
                     const rawPhone = c.phone.replace(/[^0-9]/g, '');
@@ -1132,15 +1149,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     return (
                       <div
                         key={c.phone}
-                        className="flex justify-between items-center bg-white/10 px-2.5 py-1.5 rounded-lg text-[10px]"
+                        className="flex justify-between items-center gap-2 bg-white/10 px-3 py-2 rounded-lg text-xs"
                       >
-                        <div>
+                        <div className="min-w-0 flex-1 truncate">
                           <span className="font-bold text-white">{c.name}</span>{' '}
                           <span className="font-mono text-emerald-200">({c.phone})</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
                           {isSent && (
-                            <span className="text-[9px] font-black bg-emerald-500 text-stone-950 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] font-black bg-emerald-500 text-stone-950 px-2 py-0.5 rounded whitespace-nowrap">
                               ✓ Bot Terkirim
                             </span>
                           )}
@@ -1148,7 +1165,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             href={singlePromoWaUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="bg-[#25D366] text-white font-black px-2 py-0.5 rounded text-[9px] flex items-center gap-1"
+                            className="bg-[#25D366] text-white font-black px-2.5 py-1 rounded text-[11px] flex items-center gap-1 whitespace-nowrap"
                           >
                             <i className="fa-brands fa-whatsapp"></i> WA
                           </a>
@@ -1162,7 +1179,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="submit"
                 disabled={botRunning}
-                className="tactile-btn gold-shimmer-card w-full bg-gradient-to-r from-[#D4AF37] via-amber-400 to-yellow-500 text-[#0B261C] font-black py-3 rounded-xl shadow-lg text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+                className="tactile-btn gold-shimmer-card w-full bg-gradient-to-r from-[#D4AF37] via-amber-400 to-yellow-500 text-[#0B261C] font-black py-3 rounded-xl shadow-lg text-xs uppercase tracking-wider flex items-center justify-center gap-2 text-center"
               >
                 <i className="fa-solid fa-robot text-sm"></i>
                 <span>
@@ -1175,12 +1192,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             {/* BAGIAN B: BAR NOTIFIKASI PEMBAYARAN MASUK ADMIN */}
             <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
-              <div className="flex justify-between items-center">
-                <h3 className="text-xs font-black text-[#0B261C] uppercase flex items-center gap-1.5">
-                  <i className="fa-solid fa-bell text-amber-600"></i>
-                  <span>Bar Notifikasi Pembayaran Masuk (Admin)</span>
+              <div className="flex justify-between items-center gap-2">
+                <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5 min-w-0">
+                  <i className="fa-solid fa-bell text-amber-600 flex-shrink-0"></i>
+                  <span className="truncate">Bar Notifikasi Pembayaran Masuk (Admin)</span>
                 </h3>
-                <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">
+                <span className="text-xs font-black bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full flex-shrink-0">
                   {adminNotifications.length} Notif
                 </span>
               </div>
@@ -1196,23 +1213,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={n.id}
                       className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-2"
                     >
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="text-[9px] font-black uppercase bg-emerald-800 text-amber-300 px-2 py-0.5 rounded">
+                      <div className="flex justify-between items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-black uppercase bg-emerald-800 text-amber-300 px-2 py-0.5 rounded">
                           🔔 Pembayaran Berhasil & Jam Terkunci
                         </span>
-                        <span className="text-[9px] text-stone-500 font-semibold">
+                        <span className="text-[10px] text-stone-500 font-semibold">
                           {n.createdAt}
                         </span>
                       </div>
-                      <h4 className="text-xs font-black text-[#0B261C]">{n.title}</h4>
-                      <p className="text-[11px] text-stone-700 leading-relaxed">{n.message}</p>
+                      <h4 className="text-sm font-black text-[#0B261C]">{n.title}</h4>
+                      <p className="text-xs text-stone-700 leading-relaxed">{n.message}</p>
 
                       {n.waConfirmationText && (
                         <div className="bg-white p-2.5 rounded-xl border border-stone-200 space-y-1.5">
-                          <span className="text-[9px] font-black text-stone-500 uppercase block">
+                          <span className="text-[10px] font-black text-stone-500 uppercase block">
                             Kata-Kata Konfirmasi Siap Kirim ke WA Pelanggan ({n.customerName}):
                           </span>
-                          <p className="text-[10px] text-stone-700 whitespace-pre-line leading-snug">
+                          <p className="text-xs text-stone-700 whitespace-pre-line leading-snug">
                             {n.waConfirmationText}
                           </p>
                         </div>
@@ -1227,7 +1244,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onClick={() => {
                               if (n.orderId) onVerifyPayment(n.orderId);
                             }}
-                            className="tactile-btn flex-1 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5 shadow"
+                            className="tactile-btn flex-1 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow text-center"
                           >
                             <i className="fa-brands fa-whatsapp text-sm"></i>
                             <span>Langsung Share Konfirmasi ke WA Pelanggan</span>
@@ -1241,7 +1258,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   'Kata-kata Konfirmasi WA Pelanggan'
                                 )
                               }
-                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold px-3 py-2 rounded-xl text-[10px]"
+                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold px-3 py-2 rounded-xl text-xs flex-shrink-0"
                             >
                               Salin
                             </button>
@@ -1262,13 +1279,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {adminSubTab === 'schedule' && (
           <div className="space-y-3 animate-page-enter">
             {/* 1. Atur Hari Libur Rutin Mingguan */}
-            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2">
-              <div className="flex justify-between items-center">
-                <h3 className="text-xs font-black text-[#0B261C] uppercase flex items-center gap-1">
+            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+              <div className="flex justify-between items-center gap-2 flex-wrap">
+                <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
                   <i className="fa-solid fa-calendar-xmark text-red-600"></i>
                   <span>1. Atur Libur Mingguan</span>
                 </h3>
-                <span className="text-[9px] font-bold text-stone-500">Klik Hari untuk Ubah</span>
+                <span className="text-[11px] font-bold text-stone-500">Klik Hari untuk Ubah</span>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 {dayNames.map((name, idx) => {
@@ -1278,7 +1295,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={name}
                       type="button"
                       onClick={() => onToggleWeekdayHoliday(idx)}
-                      className={`tactile-btn py-1.5 px-2 rounded-xl border text-[11px] font-black transition ${
+                      className={`tactile-btn py-2 px-1.5 rounded-xl border text-xs font-black transition truncate ${
                         isOff
                           ? 'bg-red-600 text-white border-red-700 shadow-xs'
                           : 'bg-emerald-50 text-emerald-950 border-emerald-200 hover:border-emerald-400'
@@ -1286,7 +1303,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     >
                       {name}
                       <span
-                        className={`block text-[8px] font-bold ${
+                        className={`block text-[10px] font-bold ${
                           isOff ? 'text-red-100' : 'text-emerald-700'
                         }`}
                       >
@@ -1299,8 +1316,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             {/* 2. Liburkan Tanggal Tertentu (Cuti / Acara) */}
-            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2">
-              <h3 className="text-xs font-black text-[#0B261C] uppercase flex items-center gap-1">
+            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+              <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
                 <i className="fa-solid fa-ban text-amber-600"></i>
                 <span>2. Liburkan Tanggal Tertentu</span>
               </h3>
@@ -1310,12 +1327,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   value={customDateInput}
                   onChange={(e) => setCustomDateInput(e.target.value)}
                   min={todayIso}
-                  className="flex-1 px-2.5 py-1.5 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white"
+                  className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
                 />
                 <button
                   type="button"
                   onClick={handleAddCustomDate}
-                  className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black px-3 py-1.5 rounded-xl text-xs"
+                  className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black px-3.5 py-2 rounded-xl text-xs whitespace-nowrap flex-shrink-0"
                 >
                   + Liburkan
                 </button>
@@ -1326,7 +1343,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   closedSpecificDates.map((dt) => (
                     <span
                       key={dt}
-                      className="inline-flex items-center gap-1.5 bg-red-100 text-red-900 border border-red-300 text-[10px] font-black px-2 py-0.5 rounded-lg"
+                      className="inline-flex items-center gap-1.5 bg-red-100 text-red-900 border border-red-300 text-xs font-black px-2.5 py-1 rounded-lg"
                     >
                       Libur: {dt}
                       <button
@@ -1340,7 +1357,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </span>
                   ))
                 ) : (
-                  <span className="text-[10px] text-stone-400">Belum ada tanggal libur khusus.</span>
+                  <span className="text-xs text-stone-400">Belum ada tanggal libur khusus.</span>
                 )}
               </div>
             </div>
@@ -1348,7 +1365,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {/* 3. Buka / Tutup Jam Operasional Tertentu */}
             <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
               <div>
-                <h3 className="text-xs font-black text-[#0B261C] uppercase flex items-center gap-1">
+                <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
                   <i className="fa-regular fa-clock text-emerald-700"></i>
                   <span>3. Buka / Tutup Jam Operasional</span>
                 </h3>
@@ -1358,35 +1375,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {masterTimeSlots.map((slot) => (
                   <div
                     key={slot.time}
-                    className={`flex justify-between items-center p-2 rounded-xl border transition ${
+                    className={`flex justify-between items-center gap-2 p-2.5 rounded-xl border transition ${
                       slot.active
                         ? 'bg-white border-stone-200'
                         : 'bg-stone-100 border-stone-300 opacity-90'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span
-                        className={`text-xs font-black ${
+                        className={`text-sm font-black ${
                           slot.active ? 'text-[#0B261C]' : 'text-stone-400 line-through'
                         }`}
                       >
                         {slot.time} WIB
                       </span>
                       <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                           slot.active
                             ? 'bg-emerald-100 text-emerald-900'
                             : 'bg-stone-300 text-stone-700'
                         }`}
                       >
-                        {slot.active ? 'Buka' : 'Tutup (Abu-Abu)'}
+                        {slot.active ? 'Buka' : 'Tutup'}
                       </span>
                     </div>
 
                     <button
                       type="button"
                       onClick={() => onToggleMasterSlot(slot.time)}
-                      className={`tactile-btn px-2.5 py-1 rounded-lg text-[10px] font-black transition ${
+                      className={`tactile-btn px-3 py-1.5 rounded-lg text-xs font-black transition flex-shrink-0 ${
                         slot.active
                           ? 'bg-red-100 text-red-800 hover:bg-red-200'
                           : 'bg-[#0B261C] text-[#D4AF37]'
@@ -1404,12 +1421,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   type="time"
                   value={newSlotTimeInput}
                   onChange={(e) => setNewSlotTimeInput(e.target.value)}
-                  className="flex-1 px-2.5 py-1.5 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white"
+                  className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
                 />
                 <button
                   type="button"
                   onClick={handleAddNewSlot}
-                  className="tactile-btn bg-emerald-800 hover:bg-emerald-900 text-white font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1"
+                  className="tactile-btn bg-emerald-800 hover:bg-emerald-900 text-white font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
                 >
                   <i className="fa-solid fa-plus"></i> Tambah Jam
                 </button>
@@ -1430,26 +1447,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               {/* 1. KARTU RINGKASAN OMZET HARI INI (REAL-TIME) */}
               <div className="flex items-start justify-between gap-2 pb-3 border-b border-white/15">
-                <div className="space-y-1">
+                <div className="space-y-1 min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
                       <span>OMZET HARI INI (REAL-TIME)</span>
                     </span>
-                    <span className="text-[10px] font-bold text-amber-200/90">{todayPretty}</span>
+                    <span className="text-xs font-bold text-amber-200/90">{todayPretty}</span>
                   </div>
 
                   <div className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-[#FFF3B0] via-[#D4AF37] to-[#F3E5AB] tracking-tight">
                     {formatRupiah(todayOmzetTotal)}
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
                     <span className="text-emerald-200 font-bold flex items-center gap-1">
                       <i className="fa-solid fa-circle-check text-emerald-400"></i>
                       <span>{todayVerifiedOrders.length} Pesanan Sukses Terverifikasi Hari Ini</span>
                     </span>
                     {todayWaitingVerifyCount > 0 && (
-                      <span className="bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-md font-bold text-[9px]">
+                      <span className="bg-amber-400/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded-md font-bold text-[10px]">
                         ⏳ {todayWaitingVerifyCount} Menunggu ACC
                       </span>
                     )}
@@ -1459,22 +1476,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               {/* 2. REKAPITULASI OMZET BULANAN & TOMBOL UNDUH EXCEL (CSV) */}
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="text-[9px] font-black uppercase tracking-wider text-amber-300 block">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 block">
                       REKAPITULASI OMZET BULANAN
                     </span>
-                    <div className="flex items-baseline gap-2 mt-0.5">
-                      <span className="text-base font-black text-white">
+                    <div className="flex items-baseline gap-2 flex-wrap mt-0.5">
+                      <span className="text-lg font-black text-white">
                         {formatRupiah(monthlyOmzetTotal)}
                       </span>
-                      <span className="text-[10px] text-stone-300 font-semibold">
+                      <span className="text-xs text-stone-300 font-semibold">
                         ({monthlyVerifiedOrders.length} Transaksi • {monthLabelIndo})
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
                     <input
                       type="month"
                       aria-label="Pilih Bulan Laporan Omzet"
@@ -1482,15 +1499,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       onChange={(e) =>
                         setSelectedMonthPrefix(e.target.value || getCurrentMonthPrefix())
                       }
-                      className="bg-black/40 text-amber-200 border border-[#D4AF37]/50 rounded-xl px-2 py-1 text-[10px] font-bold"
+                      className="bg-black/40 text-amber-200 border border-[#D4AF37]/50 rounded-xl px-2.5 py-1.5 text-xs font-bold"
                     />
                   </div>
                 </div>
 
                 {/* Rincian Singkat Rekap Bulanan (Collapsible) */}
                 {showMonthlyDetails && (
-                  <div className="bg-black/35 rounded-xl border border-white/15 p-2.5 space-y-1.5 max-h-44 overflow-y-auto text-[10px]">
-                    <div className="flex justify-between items-center text-[9px] font-black text-amber-300 border-b border-white/10 pb-1">
+                  <div className="bg-black/35 rounded-xl border border-white/15 p-2.5 space-y-1.5 max-h-44 overflow-y-auto text-xs">
+                    <div className="flex justify-between items-center text-[10px] font-black text-amber-300 border-b border-white/10 pb-1">
                       <span>RINCIAN TRANSAKSI ({monthLabelIndo.toUpperCase()})</span>
                       <span>NOMINAL OMZET</span>
                     </div>
@@ -1504,14 +1521,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           key={item.id}
                           className="flex justify-between items-start gap-2 py-1 border-b border-white/5 last:border-none"
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <p className="font-black text-white truncate">
                               {item.datePretty} • {item.customer}
                             </p>
-                            <p className="text-[9px] text-emerald-200 truncate">{item.items}</p>
-                            <p className="text-[9px] text-stone-400">{item.payMethod}</p>
+                            <p className="text-[11px] text-emerald-200 truncate">{item.items}</p>
+                            <p className="text-[10px] text-stone-400">{item.payMethod}</p>
                           </div>
-                          <span className="font-black text-[#D4AF37] whitespace-nowrap">
+                          <span className="font-black text-[#D4AF37] whitespace-nowrap flex-shrink-0">
                             {formatRupiah(item.total)}
                           </span>
                         </div>
@@ -1525,16 +1542,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     type="button"
                     onClick={handleDownloadMonthlyCsv}
-                    className="tactile-btn gold-shimmer-card flex-1 min-h-[42px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#071A12] font-black py-2.5 px-3 rounded-xl text-[11px] border border-amber-200 shadow-md flex items-center justify-center gap-2"
+                    className="tactile-btn gold-shimmer-card flex-1 min-h-[42px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#071A12] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-200 shadow-md flex items-center justify-center gap-2"
                   >
-                    <i className="fa-solid fa-file-excel text-emerald-950 text-sm"></i>
-                    <span>Unduh Laporan Bulanan (Excel/CSV)</span>
+                    <i className="fa-solid fa-file-excel text-emerald-950 text-sm flex-shrink-0"></i>
+                    <span className="truncate">Unduh Laporan Bulanan (CSV)</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setShowMonthlyDetails((prev) => !prev)}
-                    className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-200 border border-white/20 font-bold px-3 py-2 rounded-xl text-[10px] whitespace-nowrap"
+                    className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-200 border border-white/20 font-bold px-3 py-2 rounded-xl text-xs whitespace-nowrap flex-shrink-0"
                   >
                     {showMonthlyDetails ? 'Tutup Rincian' : 'Rincian'}
                   </button>
@@ -1559,24 +1576,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
       </div>
 
-      {/* BOTTOM NAVIGATION KHUSUS ADMIN (4 MENU ADMIN) */}
+      {/* BOTTOM NAVIGATION KHUSUS ADMIN (4 MENU ADMIN - RAPI & TIDAK TABRAKAN) */}
       <nav
         aria-label="Navigasi Admin"
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-stone-900 text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-4 py-1.5 px-2 text-[10px] font-bold z-40 shadow-2xl"
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-stone-900 text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-4 gap-0.5 py-1.5 px-1.5 text-[10px] font-bold z-40 shadow-2xl"
       >
         <button
           type="button"
           onClick={() => setAdminSubTab('orders')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 relative py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 relative py-1.5 px-0.5 rounded-xl min-w-0 transition ${
             adminSubTab === 'orders'
               ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
               : 'text-stone-400 hover:text-stone-200'
           }`}
         >
           <i className="fa-solid fa-clipboard-check text-sm"></i>
-          <span>{isEn ? 'Orders' : 'Pesanan'}</span>
+          <span className="leading-none truncate max-w-full">{isEn ? 'Orders' : 'Pesanan'}</span>
           {paidUnverifiedCount > 0 && (
-            <span className="absolute top-0.5 right-3 bg-emerald-500 text-stone-950 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+            <span className="absolute top-0.5 right-2 bg-emerald-500 text-stone-950 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
               {paidUnverifiedCount}
             </span>
           )}
@@ -1584,16 +1601,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <button
           type="button"
           onClick={handleOpenNotifTab}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 relative py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 relative py-1.5 px-0.5 rounded-xl min-w-0 transition ${
             adminSubTab === 'notifications'
               ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
               : 'text-stone-400 hover:text-stone-200'
           }`}
         >
           <i className="fa-solid fa-bullhorn text-sm"></i>
-          <span>Notif & Promo</span>
+          <span className="leading-none truncate max-w-full">Notif & Bot</span>
           {unreadAdminNotifs > 0 && (
-            <span className="absolute top-0.5 right-3 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+            <span className="absolute top-0.5 right-2 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
               {unreadAdminNotifs}
             </span>
           )}
@@ -1601,26 +1618,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <button
           type="button"
           onClick={() => setAdminSubTab('schedule')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1.5 px-0.5 rounded-xl min-w-0 transition ${
             adminSubTab === 'schedule'
               ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
               : 'text-stone-400 hover:text-stone-200'
           }`}
         >
           <i className="fa-solid fa-calendar-day text-sm"></i>
-          <span>{isEn ? 'Schedule' : 'Atur Jam'}</span>
+          <span className="leading-none truncate max-w-full">{isEn ? 'Schedule' : 'Atur Jam'}</span>
         </button>
         <button
           type="button"
           onClick={() => setAdminSubTab('account')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1.5 px-0.5 rounded-xl min-w-0 transition ${
             adminSubTab === 'account'
               ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
               : 'text-stone-400 hover:text-stone-200'
           }`}
         >
           <i className="fa-solid fa-user-shield text-sm"></i>
-          <span>{isEn ? 'Account' : 'Akun Admin'}</span>
+          <span className="leading-none truncate max-w-full">{isEn ? 'Account' : 'Akun'}</span>
         </button>
       </nav>
     </div>

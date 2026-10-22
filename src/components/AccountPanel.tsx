@@ -306,9 +306,9 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       {/* ================================================================= */}
       {isAdmin ? (
         /* KARTU KHUSUS AKUN ADMIN */
-        <div className="bg-gradient-to-br from-stone-900 via-[#0B261C] to-stone-950 text-white p-4 rounded-2xl shadow-lg border-2 border-[#D4AF37] space-y-3">
+        <div className="bg-gradient-to-br from-stone-900 via-[#0B261C] to-stone-950 text-white p-4 rounded-2xl shadow-lg border-2 border-[#D4AF37] space-y-3.5">
           <div className="flex items-center gap-3">
-            <div className="relative">
+            <div className="relative flex-shrink-0">
               {currentUser.avatar ? (
                 <img
                   src={currentUser.avatar}
@@ -331,40 +331,42 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             </div>
 
             <div className="flex-1 min-w-0">
-              <span className="text-[8px] font-black uppercase tracking-widest bg-amber-400 text-[#0B261C] px-2 py-0.5 rounded inline-block">
+              <span className="text-[9px] font-black uppercase tracking-wider bg-amber-400 text-[#0B261C] px-2 py-0.5 rounded-md inline-block max-w-full truncate">
                 {isEn ? 'OFFICIAL ADMIN ACCOUNT' : 'AKUN PENGELOLA / ADMIN RESMI'}
               </span>
-              <h2 className="text-sm font-black text-white truncate mt-0.5">{currentUser.name}</h2>
-              <p className="text-[10px] text-emerald-300 font-mono">
+              <h2 className="text-base font-black text-white truncate mt-1 leading-tight">
+                {currentUser.name}
+              </h2>
+              <p className="text-xs text-emerald-300 font-mono truncate mt-0.5">
                 <i className="fa-brands fa-whatsapp mr-1"></i>
-                {currentUser.phone} • AIFMO-P
+                {currentUser.phone === '085183110392' ? '087765573476' : currentUser.phone} • AIFMO-P
               </p>
             </div>
           </div>
 
           {/* Statistik Eksekutif Admin */}
-          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/15 text-center">
-            <div className="bg-black/30 p-2 rounded-xl border border-white/10">
-              <span className="text-[9px] text-stone-300 block">
+          <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-white/15 text-center">
+            <div className="bg-black/30 p-2 rounded-xl border border-white/10 min-w-0">
+              <span className="text-[10px] text-stone-300 font-semibold block truncate">
                 {isEn ? 'Verified Revenue' : 'Omzet Valid'}
               </span>
-              <span className="text-[11px] font-black text-[#D4AF37]">
+              <span className="text-xs font-black text-[#D4AF37] block truncate mt-0.5">
                 {formatRupiah(totalAdminRevenue)}
               </span>
             </div>
-            <div className="bg-black/30 p-2 rounded-xl border border-white/10">
-              <span className="text-[9px] text-stone-300 block">
+            <div className="bg-black/30 p-2 rounded-xl border border-white/10 min-w-0">
+              <span className="text-[10px] text-stone-300 font-semibold block truncate">
                 {isEn ? 'Total Orders' : 'Total Booking'}
               </span>
-              <span className="text-[11px] font-black text-emerald-300">
+              <span className="text-xs font-black text-emerald-300 block truncate mt-0.5">
                 {bookings.length} Sesi
               </span>
             </div>
-            <div className="bg-black/30 p-2 rounded-xl border border-white/10">
-              <span className="text-[9px] text-stone-300 block">
+            <div className="bg-black/30 p-2 rounded-xl border border-white/10 min-w-0">
+              <span className="text-[10px] text-stone-300 font-semibold block truncate">
                 {isEn ? 'Members' : 'Total Member'}
               </span>
-              <span className="text-[11px] font-black text-amber-300">
+              <span className="text-xs font-black text-amber-300 block truncate mt-0.5">
                 {storedCustomers.length} Akun
               </span>
             </div>
@@ -443,62 +445,62 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           <button
             type="button"
             onClick={() => setActiveSection('profile')}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-stone-50 transition text-left"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-stone-50 transition text-left"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-[#0B261C] flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#0B261C] flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-user-pen"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-stone-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-stone-900 leading-snug">
                   {isEn ? 'View Profile & Change Photo' : 'Lihat Profil & Ubah Foto Profil'}
                 </h3>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-xs text-stone-500 leading-snug mt-0.5">
                   {isEn
                     ? 'Update profile photo, avatar & full name'
                     : 'Atur foto profil, avatar & nama akun Anda'}
                 </p>
               </div>
             </div>
-            <i className="fa-solid fa-chevron-right text-xs text-stone-400"></i>
+            <i className="fa-solid fa-chevron-right text-xs text-stone-400 flex-shrink-0"></i>
           </button>
 
           {/* 2. Ganti Kata Sandi */}
           <button
             type="button"
             onClick={() => setActiveSection('password')}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-stone-50 transition text-left"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-stone-50 transition text-left"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-800 flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-800 flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-key"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-stone-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-stone-900 leading-snug">
                   {isEn ? 'Change Password' : 'Ganti Kata Sandi'}
                 </h3>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-xs text-stone-500 leading-snug mt-0.5">
                   {isEn
                     ? 'Via OTP, old password, or request Admin help'
                     : 'Minta OTP nomor lama, sandi lama, atau bantuan Admin'}
                 </p>
               </div>
             </div>
-            <i className="fa-solid fa-chevron-right text-xs text-stone-400"></i>
+            <i className="fa-solid fa-chevron-right text-xs text-stone-400 flex-shrink-0"></i>
           </button>
 
           {/* 3. Riwayat Transaksi */}
           <button
             type="button"
             onClick={() => setActiveSection('transactions')}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-stone-50 transition text-left"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-stone-50 transition text-left"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-file-invoice-dollar"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-stone-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-stone-900 leading-snug">
                   {isAdmin
                     ? isEn
                       ? 'All Customer Transactions & Revenue'
@@ -507,14 +509,14 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                     ? 'Transaction History & Receipts'
                     : 'Riwayat Transaksi & Struk Pembayaran'}
                 </h3>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-xs text-stone-500 leading-snug mt-0.5">
                   {isAdmin
                     ? `${bookings.length} transaksi tercatat di sistem`
                     : `${userTransactions.length} riwayat transaksi & struk resmi`}
                 </p>
               </div>
             </div>
-            <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">
+            <span className="text-xs font-black bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-full flex-shrink-0">
               {userTransactions.length}
             </span>
           </button>
@@ -523,70 +525,70 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           <button
             type="button"
             onClick={() => setActiveSection('help')}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-stone-50 transition text-left"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-stone-50 transition text-left"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-800 flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-800 flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-headset"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-stone-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-stone-900 leading-snug">
                   {isEn ? 'Help Center & Support' : 'Pusat Bantuan'}
                 </h3>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-xs text-stone-500 leading-snug mt-0.5">
                   {isEn
                     ? 'FAQ, booking guide & direct WhatsApp support'
                     : 'Tanya jawab (FAQ), panduan & kontak WA Admin'}
                 </p>
               </div>
             </div>
-            <i className="fa-solid fa-chevron-right text-xs text-stone-400"></i>
+            <i className="fa-solid fa-chevron-right text-xs text-stone-400 flex-shrink-0"></i>
           </button>
 
           {/* 5. Tentang GRIYA AYU */}
           <button
             type="button"
             onClick={() => setActiveSection('about')}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-stone-50 transition text-left"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-stone-50 transition text-left"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-amber-50 text-[#0B261C] flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-[#0B261C] flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-spa"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-stone-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-stone-900 leading-snug">
                   {isEn ? 'About GRIYA AYU' : 'Tentang GRIYA AYU'}
                 </h3>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-xs text-stone-500 leading-snug mt-0.5">
                   {isEn
                     ? 'AIFMO-P Certification, Therapist & Service Profile'
                     : 'Sertifikasi AIFMO-P, Profil Therapist & Layanan'}
                 </p>
               </div>
             </div>
-            <i className="fa-solid fa-chevron-right text-xs text-stone-400"></i>
+            <i className="fa-solid fa-chevron-right text-xs text-stone-400 flex-shrink-0"></i>
           </button>
 
           {/* 6. Bahasa (Indonesia / Inggris) */}
           <button
             type="button"
             onClick={() => setActiveSection('language')}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-stone-50 transition text-left"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-stone-50 transition text-left"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-800 flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-800 flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-globe"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-stone-900">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-stone-900 leading-snug">
                   {isEn ? 'Language / Bahasa' : 'Bahasa (Indonesia / Inggris)'}
                 </h3>
-                <p className="text-[10px] text-stone-500">
+                <p className="text-xs text-stone-500 leading-snug mt-0.5">
                   {isEn ? 'Active: English (EN)' : 'Aktif: Bahasa Indonesia (ID)'}
                 </p>
               </div>
             </div>
-            <span className="text-[10px] font-black bg-[#0B261C] text-[#D4AF37] px-2.5 py-1 rounded-lg uppercase">
+            <span className="text-[11px] font-black bg-[#0B261C] text-[#D4AF37] px-2.5 py-1 rounded-lg uppercase flex-shrink-0">
               {language === 'id' ? '🇮🇩 ID' : '🇬🇧 EN'}
             </span>
           </button>
@@ -595,24 +597,24 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           <button
             type="button"
             onClick={onLogout}
-            className="w-full p-3.5 flex items-center justify-between hover:bg-red-50 transition text-left group"
+            className="w-full p-3.5 flex items-center justify-between gap-2.5 hover:bg-red-50 transition text-left group"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center text-sm">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="w-10 h-10 rounded-xl bg-red-100 text-red-700 flex items-center justify-center text-base flex-shrink-0">
                 <i className="fa-solid fa-right-from-bracket"></i>
               </div>
-              <div>
-                <h3 className="text-xs font-black text-red-700">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-black text-red-700 leading-snug">
                   {isEn ? 'Log Out / Switch Account' : 'Keluar / Ganti Akun'}
                 </h3>
-                <p className="text-[10px] text-red-500">
+                <p className="text-xs text-red-500 leading-snug mt-0.5">
                   {isEn
                     ? 'Sign out and login with another account'
                     : 'Keluar dari sesi saat ini untuk ganti akun lain'}
                 </p>
               </div>
             </div>
-            <i className="fa-solid fa-chevron-right text-xs text-red-400"></i>
+            <i className="fa-solid fa-chevron-right text-xs text-red-400 flex-shrink-0"></i>
           </button>
         </div>
       )}
@@ -898,12 +900,12 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             <div className="space-y-3">
               {!isAdmin ? (
                 <div className="space-y-2.5">
-                  <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 text-[11px] text-stone-600 leading-relaxed">
+                  <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 text-xs text-stone-600 leading-relaxed">
                     Lupa kata sandi lama atau nomor sudah tidak aktif? Anda dapat meminta bantuan{' '}
-                    <b>Admin Rismawati (0851-8311-0392)</b> untuk mengganti kata sandi akun Anda.
+                    <b>Admin Rismawati (0877-6557-3476)</b> untuk mengganti kata sandi akun Anda.
                   </div>
                   <a
-                    href={`https://wa.me/6285183110392?text=${encodeURIComponent(
+                    href={`https://wa.me/6287765573476?text=${encodeURIComponent(
                       `Halo Admin Griya Ayu (Rismawati), saya ingin meminta bantuan untuk mengganti kata sandi akun member saya:\n\n• Nama: ${currentUser.name}\n• Nomor Terdaftar: ${currentUser.phone}\n\nTerima kasih!`
                     )}`}
                     target="_blank"
@@ -1099,7 +1101,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           </div>
 
           <a
-            href="https://wa.me/6285183110392?text=Halo%20Admin%20Griya%20Ayu%20(Rismawati)%2C%20saya%20membutuhkan%20bantuan%20terkait%20aplikasi%20booking."
+            href="https://wa.me/6287765573476?text=Halo%20Admin%20Griya%20Ayu%20(Rismawati)%2C%20saya%20membutuhkan%20bantuan%20terkait%20aplikasi%20booking."
             target="_blank"
             rel="noopener noreferrer"
             className="tactile-btn flex items-center justify-center gap-2 w-full bg-emerald-700 text-white font-black py-3 rounded-xl text-xs shadow"
@@ -1128,7 +1130,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             </p>
           </div>
 
-          <div className="space-y-2.5 text-[11px] text-stone-600 leading-relaxed">
+          <div className="space-y-2.5 text-xs text-stone-600 leading-relaxed">
             <p>
               <b>Griya Ayu Sport Massage & Spa</b> menghadirkan layanan pemulihan kebugaran tubuh,
               penanganan cedera olahraga (Upper & Lower Injury), Bekam Sunnah 9 Titik Nabawi, serta
@@ -1165,7 +1167,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                 • Terapis Bersertifikat: <b>Ibu Kartini (AIFMO-P)</b>
               </p>
               <p>
-                • Admin & Reservasi: <b>Rismawati (0851-8311-0392)</b>
+                • Admin & Reservasi: <b>Rismawati (0877-6557-3476)</b>
               </p>
               <p>
                 • Alamat: <b>{GRIYA_AYU_ADDRESS}</b>

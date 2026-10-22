@@ -75,7 +75,10 @@ export default function App() {
     if (!session) return null;
     if (session.isAdmin) {
       const savedAdmin = safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
-      return savedAdmin || session.user;
+      const baseAdmin = savedAdmin || session.user;
+      return baseAdmin.phone === '085183110392'
+        ? { ...baseAdmin, phone: '087765573476' }
+        : baseAdmin;
     }
     const storedList = loadCustomersPersistently(INITIAL_USERS);
     const matched = storedList.find(
@@ -114,9 +117,13 @@ export default function App() {
     safeLoadJson<string[]>(STORAGE_KEYS.CLOSED_DATES, [])
   );
 
-  const [adminProfile, setAdminProfile] = useState<User | null>(() =>
-    safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null)
-  );
+  const [adminProfile, setAdminProfile] = useState<User | null>(() => {
+    const loaded = safeLoadJson<User | null>(STORAGE_KEYS.ADMIN_PROFILE, null);
+    if (loaded && loaded.phone === '085183110392') {
+      return { ...loaded, phone: '087765573476' };
+    }
+    return loaded;
+  });
 
   // Modals & Popups
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
@@ -278,13 +285,20 @@ export default function App() {
           safeSaveJson(STORAGE_KEYS.CLOSED_DATES, settings.closedSpecificDates);
         }
         if (settings.adminProfile) {
-          setAdminProfile(settings.adminProfile);
-          safeSaveJson(STORAGE_KEYS.ADMIN_PROFILE, settings.adminProfile);
+          const normalizedAdmin: User =
+            settings.adminProfile.phone === '085183110392'
+              ? { ...settings.adminProfile, phone: '087765573476' }
+              : settings.adminProfile;
+          setAdminProfile(normalizedAdmin);
+          safeSaveJson(STORAGE_KEYS.ADMIN_PROFILE, normalizedAdmin);
           setCurrentUser((curr) => {
             if (!curr || curr.role !== 'admin') return curr;
-            saveActiveSession(settings.adminProfile!, true);
-            return settings.adminProfile!;
+            saveActiveSession(normalizedAdmin, true);
+            return normalizedAdmin;
           });
+          if (settings.adminProfile.phone === '085183110392') {
+            void syncSpaSettingsToCloud({ adminProfile: normalizedAdmin });
+          }
         }
       },
     });
@@ -1386,7 +1400,7 @@ export default function App() {
   const activePaymentOrder = bookings.find((b) => b.id === activePaymentOrderId) || null;
   const activeReceiptOrder = bookings.find((b) => b.id === receiptOrderId) || null;
 
-  const directWaUrl = `https://wa.me/6285183110392?text=${encodeURIComponent(
+  const directWaUrl = `https://wa.me/6287765573476?text=${encodeURIComponent(
     currentUser
       ? `Halo Admin Griya Ayu (Rismawati), saya ${currentUser.name} (${currentUser.phone}) ingin berkonsultasi mengenai jadwal & layanan terapi.`
       : `Halo Admin Griya Ayu Sport Massage & Spa (Rismawati), saya ingin bertanya mengenai informasi layanan dan jadwal terapi.`
@@ -1395,7 +1409,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#050e0a] text-stone-800 flex justify-center selection:bg-[#D4AF37] selection:text-[#0B261C]">
       {/* CONTAINER MOBILE UTAMA (max-w-md mx-auto) */}
-      <div className="w-full max-w-md min-h-screen bg-[#F9F6F0] shadow-2xl relative flex flex-col border-x border-stone-800/80 overflow-x-hidden">
+      <div className="w-full max-w-md min-h-screen bg-[#F9F6F0] shadow-2xl relative flex flex-col border-x border-stone-800/80 overflow-x-clip">
         {/* Layer Perayaan Confetti & Floating +Poin */}
         <CelebrationLayer
           pointsText={celebration.pointsText}
@@ -1441,7 +1455,7 @@ export default function App() {
         )}
 
         {/* =============================================================== */}
-        {/* HALAMAN KHUSUS ADMIN (085183110392 // RISMAWATI)                */}
+        {/* HALAMAN KHUSUS ADMIN (087765573476 // RISMAWATI)                */}
         {/* =============================================================== */}
         {activeScreen === 'app' && isAdmin && currentUser && (
           <AdminDashboard
@@ -1475,14 +1489,10 @@ export default function App() {
         )}
 
         {/* =============================================================== */}
-        {/* FLOATING LOGO WHATSAPP DI KANAN BAWAH DEKAT NAVBAR              */}
+        {/* FLOATING LOGO WHATSAPP DI LAYAR LOGIN                           */}
         {/* =============================================================== */}
-        {!isAdmin && (
-          <div
-            className={`fixed ${
-              activeScreen === 'app' ? 'bottom-[74px]' : 'bottom-5'
-            } left-1/2 -translate-x-1/2 w-full max-w-md pointer-events-none z-40 px-4 flex justify-end`}
-          >
+        {!isAdmin && activeScreen === 'auth' && (
+          <div className="fixed bottom-5 left-1/2 -translate-x-1/2 w-full max-w-md pointer-events-none z-40 px-4 flex justify-end">
             <a
               href={directWaUrl}
               target="_blank"

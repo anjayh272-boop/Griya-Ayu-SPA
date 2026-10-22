@@ -55,6 +55,10 @@ export const GRIYA_AYU_QRIS_IMAGE = '/assets/aistudio/image_2c1d837f.png';
 export const GRIYA_AYU_QRIS_NMID = 'ID1026618031821';
 export const GRIYA_AYU_QRIS_MERCHANT = 'ADMIN GRIYA AYU SPA';
 
+export const GRIYA_AYU_ADMIN_PHONE = '087765573476';
+export const GRIYA_AYU_ADMIN_PHONE_DISPLAY = '0877-6557-3476';
+export const GRIYA_AYU_ADMIN_WA = '6287765573476';
+
 export function getPaymentMethodDetails(
   methodType: PaymentMethodType,
   customerPhone: string = '081288997766'
@@ -65,7 +69,7 @@ export function getPaymentMethodDetails(
   isQris: boolean;
   isCash: boolean;
 } {
-  const cleanDigits = customerPhone.replace(/[^0-9]/g, '').slice(-10) || '8518311039';
+  const cleanDigits = customerPhone.replace(/[^0-9]/g, '').slice(-10) || '8776557347';
   switch (methodType) {
     case 'qris':
       return {
@@ -393,7 +397,7 @@ export function buildCustomerBookingWaToAdminMessage(order: BookingOrder): {
 
   return {
     text,
-    url: `https://wa.me/6285183110392?text=${encodeURIComponent(text)}`,
+    url: `https://wa.me/6287765573476?text=${encodeURIComponent(text)}`,
   };
 }
 
@@ -433,7 +437,7 @@ export function calculateOrderPricing(
   chosenRewardId: string,
   pointRewards: PointReward[],
   customerPoints: number,
-  injurySpot?: string
+  injurySpot?: string | Record<string, string[]>
 ): {
   titleStr: string;
   subtotal: number;
@@ -451,7 +455,16 @@ export function calculateOrderPricing(
       const s = singleCatalog.find((item) => item.id === id);
       if (s) {
         if ((id === 's2' || id === 's4') && injurySpot) {
-          titles.push(`${s.name} [${injurySpot}]`);
+          if (typeof injurySpot === 'string') {
+            titles.push(`${s.name} [${injurySpot}]`);
+          } else {
+            const spots = injurySpot[id];
+            if (spots && spots.length > 0) {
+              titles.push(`${s.name} [${spots.join(', ')}]`);
+            } else {
+              titles.push(s.name);
+            }
+          }
         } else {
           titles.push(s.name);
         }
@@ -620,7 +633,7 @@ export function buildCustomerToAdminRefundWaMessage(order: BookingOrder): string
       `----------------------------------------\n` +
       `Mohon dibantu proses pengembalian dananya ya Admin. Terima kasih! 🙏`;
 
-  return `https://wa.me/6285183110392?text=${encodeURIComponent(text)}`;
+  return `https://wa.me/6287765573476?text=${encodeURIComponent(text)}`;
 }
 
 export function buildAdminApproveRefundWaMessage(order: BookingOrder): {
