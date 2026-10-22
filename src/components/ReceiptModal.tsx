@@ -36,6 +36,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   onClose,
   onChangeMethodType,
   onPayFromReceipt,
+  onFailFromReceipt,
   onCopyText,
 }) => {
   const [remainingMs, setRemainingMs] = useState<number>(20 * 60 * 1000);
@@ -72,12 +73,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const invoiceCode = `GA-${String(order.id).slice(-6)}`;
   const isLocked = isOrderLockedStatus(order);
-  const isFailed = order.paymentStatus === 'Gagal';
+  const isFailed = order.paymentStatus === 'Gagal' || order.status === 'Cancelled';
   const isExpired = !isLocked && remainingMs <= 0;
   const methodInfo = getPaymentMethodDetails(selectedType, order.wa);
   const isCashSelected = selectedType === 'cash';
 
   const handleSwitchMethodInReceipt = (newType: PaymentMethodType) => {
+    if (isFailed || isExpired) return;
     setSelectedType(newType);
     setReceiptProofError('');
     if (onChangeMethodType) {
@@ -86,6 +88,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   };
 
   const handleUploadReceiptProof = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isFailed || isExpired) return;
     const file = e.target.files?.[0];
     if (!file) return;
     try {
@@ -105,8 +108,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   };
 
   const handlePayNowInReceipt = () => {
+    if (isFailed || isExpired || Date.now() >= order.expiresAt) {
+      if (onFailFromReceipt) {
+        onFailFromReceipt(order.id, selectedType);
+      }
+      return;
+    }
     if (!isCashSelected) {
-      if (isExpired) return;
       if (!receiptProofImage) {
         setReceiptProofError(
           'Mohon unggah foto bukti transfer / screenshot QRIS terlebih dahulu sebelum mengunci jadwal.'
@@ -330,25 +338,42 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
             </div>
 
-            {/* JIKA PEMBAYARAN MASIH PENDING: PILIH 3 METODE (QRIS / TRANSFER BANK / CASH) */}
-            {!isLocked && !isAdmin && (
+            {/* JIKA WAKTU 20 MENIT SUDAH BERAKHIR ATAU GAGAL: TIDAK BISA BAYAR LAGI */}
+            {!isLocked && !isAdmin && (isFailed || isExpired) && (
+              <div className="pt-2 border-t-2 border-dashed border-red-300 space-y-2">
+                <div className="bg-red-50 border-2 border-red-300 p-3.5 rounded-2xl text-center space-y-1.5">
+                  <div className="w-10 h-10 rounded-full bg-red-100 text-red-700 flex items-center justify-center mx-auto text-base">
+                    <i className="fa-solid fa-ban"></i>
+                  </div>
+                  <span className="text-xs font-black text-red-900 block uppercase">
+                    ✕ Pembayaran Gagal (Waktu 20 Menit Habis)
+                  </span>
+                  <p className="text-[11px] text-red-800 leading-relaxed">
+                    Batas waktu pembayaran 20 menit untuk pesanan ini telah berakhir. Anda tidak
+                    dapat melakukan pembayaran lagi pada pesanan ini. Silakan buat booking jadwal
+                    baru.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* JIKA PEMBAYARAN MASIH PENDING (< 20 MENIT): PILIH 3 METODE & SELESAIKAN PEMBAYARAN */}
+            {!isLocked && !isAdmin && !isFailed && !isExpired && (
               <div className="pt-2 border-t-2 border-dashed border-amber-300 space-y-3">
-                {/* Timer 20 Menit Hanya Muncul Jika Pilih QRIS / Transfer Bank */}
-                {!isCashSelected && (
-                  <div className="bg-amber-50 border border-amber-300 p-2.5 rounded-xl flex justify-between items-center">
-                    <div>
-                      <span className="text-[10px] font-black text-amber-950 block">
-                        ⏳ Countdown Timer 20 Menit
-                      </span>
-                      <span className="text-[9px] text-amber-800">
-                        Selesaikan pembayaran & unggah bukti untuk kunci jam {order.time} WIB:
-                      </span>
-                    </div>
-                    <span className="font-mono font-black text-xs bg-[#0B261C] text-[#D4AF37] px-2 py-1 rounded-lg">
-                      {formatCountdown(remainingMs)}
+                {/* Timer 20 Menit Selalu Tampil Selama Pending */}
+                <div className="bg-amber-50 border border-amber-300 p-2.5 rounded-xl flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] font-black text-amber-950 block">
+                      ⏳ Batas Waktu Pembayaran (20 Menit)
+                    </span>
+                    <span className="text-[9px] text-amber-800">
+                      Selesaikan pembayaran sebelum waktu habis untuk kunci jam {order.time} WIB:
                     </span>
                   </div>
-                )}
+                  <span className="font-mono font-black text-xs bg-[#0B261C] text-[#D4AF37] px-2 py-1 rounded-lg">
+                    {formatCountdown(remainingMs)}
+                  </span>
+                </div>
 
                 {/* Pilihan 3 Metode Bayar di Dalam Struk */}
                 <div className="grid grid-cols-3 gap-1.5 text-[10px] font-black">
@@ -499,7 +524,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <p className="text-[10px] text-stone-500 text-center leading-relaxed">
                     {isCashSelected
                       ? 'Klik tombol di atas untuk mengunci slot jam secara permanen dan menerbitkan Struk Digital. Pembayaran dilakukan di kasir saat kedatangan.'
-                      : 'Unggah bukti pembayaran untuk mengunci jadwal secara permanen.'}
+                      : 'Unggah bukti pembayaran untuk menyelesaikan pembayaran dan mengunci jadwal secara permanen.'}
                   </p>
                 </div>
               </div>
@@ -509,9 +534,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               <div className="text-center pt-1">
                 <p className="text-[11px] text-emerald-900 font-bold leading-snug bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
                   <i className="fa-solid fa-circle-check mr-1.5 text-emerald-600"></i>
-                  Jadwal sesi <b>{order.time} WIB</b> telah dikunci secara permanen (
-                  <b>{order.paymentStatus}</b>). Klik tombol WhatsApp di bawah untuk mengirim bukti
-                  booking ke Admin.
+                  Pembayaran <b>BERHASIL</b> & jadwal sesi <b>{order.time} WIB</b> telah dikunci
+                  secara permanen (<b>{order.paymentStatus}</b>). Klik tombol WhatsApp di bawah untuk
+                  mengirim bukti booking ke Admin.
                 </p>
               </div>
             )}
@@ -529,7 +554,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <i className="fa-brands fa-whatsapp text-base"></i>
                 <span>ACC & Kirim Konfirmasi WA ke Pelanggan</span>
               </a>
-            ) : (
+            ) : isLocked ? (
               <a
                 href={customerToAdminBookingWa.url}
                 target="_blank"
@@ -539,7 +564,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <i className="fa-brands fa-whatsapp text-lg flex-shrink-0"></i>
                 <span>Kirim Bukti Booking ke WhatsApp Admin</span>
               </a>
-            )}
+            ) : null}
 
             <button
               type="button"

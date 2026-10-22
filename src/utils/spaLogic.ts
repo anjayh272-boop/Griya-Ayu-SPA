@@ -37,16 +37,16 @@ export const GRIYA_AYU_BANK_ACCOUNTS = [
   {
     id: 'bca',
     bankName: 'BANK BCA',
-    accountNumber: '7390881234',
-    accountNumberFormatted: '7390 8812 34',
-    accountHolder: 'Griya Ayu / Rismawati',
+    accountNumber: '7285780985',
+    accountNumberFormatted: '7285780985',
+    accountHolder: 'KARTINI',
   },
   {
     id: 'mandiri',
     bankName: 'BANK MANDIRI',
-    accountNumber: '1560012889912',
-    accountNumberFormatted: '1560 0128 8991 2',
-    accountHolder: 'Griya Ayu / Rismawati',
+    accountNumber: '1560010933630',
+    accountNumberFormatted: '1560010933630',
+    accountHolder: 'KARTINI',
   },
 ] as const;
 
@@ -77,9 +77,9 @@ export function getPaymentMethodDetails(
       };
     case 'bank_transfer':
       return {
-        label: 'Transfer Bank (BCA / Mandiri a.n. Griya Ayu / Rismawati)',
+        label: 'Transfer Bank (BCA / Mandiri a.n. KARTINI)',
         shortBank: 'TRANSFER BANK (BCA / MANDIRI)',
-        vaNumber: 'BCA 7390881234 / Mandiri 1560012889912',
+        vaNumber: 'BCA 7285780985 / Mandiri 1560010933630 (a.n. KARTINI)',
         isQris: false,
         isCash: false,
       };
@@ -93,17 +93,17 @@ export function getPaymentMethodDetails(
       };
     case 'va_bca':
       return {
-        label: 'Transfer Bank BCA (a.n. Griya Ayu / Rismawati)',
+        label: 'Transfer Bank BCA (a.n. KARTINI)',
         shortBank: 'BANK BCA',
-        vaNumber: '7390 8812 34',
+        vaNumber: '7285780985',
         isQris: false,
         isCash: false,
       };
     case 'va_mandiri':
       return {
-        label: 'Transfer Bank Mandiri (a.n. Griya Ayu / Rismawati)',
+        label: 'Transfer Bank Mandiri (a.n. KARTINI)',
         shortBank: 'BANK MANDIRI',
-        vaNumber: '1560 0128 8991 2',
+        vaNumber: '1560010933630',
         isQris: false,
         isCash: false,
       };

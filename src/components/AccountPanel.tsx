@@ -372,17 +372,17 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
         </div>
       ) : (
         /* KARTU KHUSUS AKUN PELANGGAN (CUSTOMER) */
-        <div className="gold-shimmer-card bg-gradient-to-r from-[#0B261C] via-[#133e2e] to-[#0B261C] text-white p-4 rounded-2xl shadow-lg border-2 border-[#D4AF37]/80 space-y-3">
-          <div className="flex items-center gap-3">
-            <div className="relative">
+        <div className="gold-shimmer-card bg-gradient-to-r from-[#0B261C] via-[#133e2e] to-[#0B261C] text-white p-3.5 rounded-2xl shadow-lg border-2 border-[#D4AF37]/80 space-y-3">
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="relative flex-shrink-0">
               {currentUser.avatar ? (
                 <img
                   src={currentUser.avatar}
                   alt={currentUser.name}
-                  className="w-14 h-14 rounded-full object-cover border-2 border-[#D4AF37] shadow-md"
+                  className="w-13 h-13 rounded-full object-cover border-2 border-[#D4AF37] shadow-md"
                 />
               ) : (
-                <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#D4AF37] to-amber-500 text-[#0B261C] flex items-center justify-center text-base font-black border-2 border-amber-100 shadow-md">
+                <div className="w-13 h-13 rounded-full bg-gradient-to-br from-[#D4AF37] to-amber-500 text-[#0B261C] flex items-center justify-center text-sm font-black border-2 border-amber-100 shadow-md">
                   {initials}
                 </div>
               )}
@@ -390,29 +390,33 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                 type="button"
                 onClick={() => setActiveSection('profile')}
                 aria-label="Ubah Foto Profil"
-                className="tactile-btn absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#D4AF37] text-[#0B261C] border border-[#0B261C] flex items-center justify-center text-[10px] shadow"
+                className="tactile-btn absolute -bottom-1 -right-1 w-5.5 h-5.5 rounded-full bg-[#D4AF37] text-[#0B261C] border border-[#0B261C] flex items-center justify-center text-[9px] shadow"
               >
                 <i className="fa-solid fa-camera"></i>
               </button>
             </div>
 
             <div className="flex-1 min-w-0">
-              <span className="text-[8px] font-black uppercase tracking-widest bg-[#D4AF37] text-[#0B261C] px-2 py-0.5 rounded inline-flex items-center gap-1">
-                <i className="fa-solid fa-crown"></i>{' '}
-                {isEn ? 'VIP MEMBER ACCOUNT' : 'AKUN MEMBER PELANGGAN'}
+              <span className="text-[9px] font-black uppercase tracking-normal bg-[#D4AF37] text-[#0B261C] px-2 py-0.5 rounded-md inline-flex items-center gap-1 max-w-full truncate">
+                <i className="fa-solid fa-crown flex-shrink-0"></i>
+                <span className="truncate">{isEn ? 'VIP MEMBER' : 'MEMBER RESMI'}</span>
               </span>
-              <h2 className="text-sm font-black text-white truncate mt-0.5">{currentUser.name}</h2>
-              <p className="text-[10px] text-emerald-200 font-mono">
+              <h2 className="text-sm font-black text-white truncate mt-1 leading-tight">
+                {currentUser.name}
+              </h2>
+              <p className="text-[11px] text-emerald-200 font-mono truncate mt-0.5">
                 <i className="fa-solid fa-phone mr-1 text-[9px]"></i>
                 {currentUser.phone}
               </p>
             </div>
 
-            <div className="text-right bg-black/30 px-3 py-2 rounded-xl border border-[#D4AF37]/40">
-              <span className="text-[8px] uppercase text-amber-200 font-bold block">
-                {isEn ? 'Active Points' : 'Saldo Poin'}
+            <div className="flex-shrink-0 text-right bg-black/30 px-2.5 py-1.5 rounded-xl border border-[#D4AF37]/40 whitespace-nowrap">
+              <span className="text-[9px] uppercase text-amber-200 font-bold block leading-tight">
+                {isEn ? 'Points' : 'Saldo Poin'}
               </span>
-              <span className="text-base font-black text-[#D4AF37]">{currentUser.points} Pts</span>
+              <span className="text-sm font-black text-[#D4AF37] leading-tight">
+                {currentUser.points} Pts
+              </span>
             </div>
           </div>
         </div>

@@ -9,6 +9,13 @@ export interface User {
   avatar?: string;
 }
 
+export type ServiceGridCategory =
+  | 'kebugaran'
+  | 'otot_cedera'
+  | 'spa_tubuh'
+  | 'bekam'
+  | 'khusus_wanita';
+
 export interface ServiceItem {
   id: string;
   name: string;
@@ -19,6 +26,9 @@ export interface ServiceItem {
   desc: string;
   normalPrice?: number;
   category?: 'sport' | 'wellness';
+  gender?: 'all' | 'male' | 'female';
+  genderBadge?: string;
+  gridCategories?: ServiceGridCategory[];
 }
 
 export interface PointReward {

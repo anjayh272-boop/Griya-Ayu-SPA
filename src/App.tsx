@@ -530,7 +530,36 @@ export default function App() {
     setPaymentModalOpen(true);
   };
 
-  // Konfirmasi langsung dari Wizard Langkah 3 (Pembayaran & Konfirmasi) -> Munculkan Struk Digital & Kunci Jam
+  // Otomatis ubah status booking Pending menjadi Gagal apabila batas waktu 20 menit telah berakhir
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setBookings((prev) => {
+        const hasExpiredPending = prev.some(
+          (b) => b.paymentStatus === 'Pending' && b.expiresAt <= now
+        );
+        if (!hasExpiredPending) return prev;
+
+        const next = prev.map((b) => {
+          if (b.paymentStatus === 'Pending' && b.expiresAt <= now) {
+            const failedOrder: BookingOrder = {
+              ...b,
+              paymentStatus: 'Gagal',
+              status: 'Cancelled',
+            };
+            void syncBookingToCloud(failedOrder);
+            return failedOrder;
+          }
+          return b;
+        });
+        saveBookingsPersistently(next);
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Konfirmasi dari Wizard Langkah 3 (simpan sebagai Pending di Riwayat saat masuk Langkah 3, atau kunci permanen saat Selesai Bayar)
   const handleConfirmWizardBooking = (draft: {
     total: number;
     scheduleDatePretty: string;
@@ -542,11 +571,46 @@ export default function App() {
     payMethodType: PaymentMethodType;
     markAsPaid: boolean;
     paymentProofImage?: string;
+    existingOrderId?: number | null;
+    silentReceipt?: boolean;
   }): BookingOrder | null => {
     if (!currentUser) return null;
 
+    const now = Date.now();
+    const existingOrder = draft.existingOrderId
+      ? bookings.find((b) => b.id === draft.existingOrderId)
+      : undefined;
+
+    // Jika sedang mencoba membayar pesanan Pending yang waktunya (20 menit) sudah habis -> otomatis GAGAL
+    if (
+      draft.markAsPaid &&
+      existingOrder &&
+      (existingOrder.paymentStatus === 'Gagal' || now >= existingOrder.expiresAt)
+    ) {
+      updateBookingsAndPersist((prev) =>
+        prev.map((b) =>
+          b.id === existingOrder.id
+            ? { ...b, paymentStatus: 'Gagal', status: 'Cancelled' }
+            : b
+        )
+      );
+      showToast(
+        'Waktu Pembayaran Habis (Gagal) ⏳',
+        'Batas waktu pembayaran 20 menit untuk booking ini telah berakhir sehingga pembayaran tidak dapat diproses lagi. Silakan buat booking baru.'
+      );
+      return null;
+    }
+
     const methodInfo = getPaymentMethodDetails(draft.payMethodType, currentUser.phone);
-    const newOrderId = Date.now();
+    const isUpdatingExistingPending =
+      Boolean(existingOrder) &&
+      existingOrder!.paymentStatus === 'Pending' &&
+      now < existingOrder!.expiresAt;
+
+    const targetOrderId = isUpdatingExistingPending ? existingOrder!.id : now;
+    const targetExpiresAt = isUpdatingExistingPending
+      ? existingOrder!.expiresAt
+      : now + 20 * 60 * 1000;
     const isCash = draft.payMethodType === 'cash';
 
     if (draft.markAsPaid && draft.pointsRedeemedCost > 0) {
@@ -576,7 +640,7 @@ export default function App() {
       : 'Menunggu Verifikasi Admin';
 
     const newBooking: BookingOrder = {
-      id: newOrderId,
+      id: targetOrderId,
       customer: currentUser.name,
       wa: currentUser.phone,
       items: draft.itemsSummary,
@@ -590,13 +654,19 @@ export default function App() {
       payMethodType: draft.payMethodType,
       vaNumber: methodInfo.vaNumber,
       paymentStatus: resolvedPaymentStatus,
-      expiresAt: Date.now() + 20 * 60 * 1000,
+      expiresAt: targetExpiresAt,
       status: draft.markAsPaid ? 'Paid' : 'Pending_Payment',
-      createdAt: nowFormatted(),
-      paymentProofImage: draft.paymentProofImage,
+      createdAt: isUpdatingExistingPending ? existingOrder!.createdAt : nowFormatted(),
+      paymentProofImage: draft.paymentProofImage || existingOrder?.paymentProofImage,
     };
 
-    updateBookingsAndPersist((prev) => [newBooking, ...prev]);
+    updateBookingsAndPersist((prev) => {
+      const exists = prev.some((b) => b.id === targetOrderId);
+      if (exists) {
+        return prev.map((b) => (b.id === targetOrderId ? newBooking : b));
+      }
+      return [newBooking, ...prev];
+    });
 
     if (draft.markAsPaid) {
       const waConfirm = buildAdminWaConfirmationMessage(newBooking);
@@ -647,14 +717,14 @@ export default function App() {
 
       addNotificationsAndSync([adminNotif, customerNotif]);
       triggerCelebration(`Jam ${newBooking.time} Terkunci!`);
-    } else {
+    } else if (!isUpdatingExistingPending) {
       const pendingNotif: AppNotification = {
         id: Date.now() + 1,
         target: 'customer',
         targetPhone: newBooking.wa,
         type: 'payment_pending',
         title: `⏳ Menunggu Pembayaran (20 Menit) — Jam ${newBooking.time} WIB`,
-        message: `Tagihan ${formatRupiah(newBooking.total)} (${newBooking.payMethod}) masih PENDING selama 20 menit. Buka menu Riwayat untuk menyelesaikan pembayaran.`,
+        message: `Tagihan ${formatRupiah(newBooking.total)} (${newBooking.payMethod}) tersimpan di menu Riwayat dengan waktu tunggu 20 menit. Segera selesaikan pembayaran sebelum waktu habis.`,
         createdAt: nowFormatted(),
         read: false,
         orderId: newBooking.id,
@@ -662,7 +732,9 @@ export default function App() {
       addNotificationsAndSync([pendingNotif]);
     }
 
-    setReceiptOrderId(newBooking.id);
+    if (!draft.silentReceipt) {
+      setReceiptOrderId(newBooking.id);
+    }
     return newBooking;
   };
 
@@ -714,12 +786,13 @@ export default function App() {
           payMethod: details.label,
           vaNumber: details.vaNumber,
           paymentStatus: 'Gagal',
+          status: 'Cancelled',
         };
       })
     );
   };
 
-  // Jika Pembayaran / Konfirmasi Booking Selesai (via Modal Pembayaran atau di dalam Struk Pending)
+  // Jika Pembayaran / Konfirmasi Booking Selesai (via Modal Pembayaran atau di dalam Struk Pending dari Bar Riwayat)
   const handlePaymentSuccess = (
     orderId: number,
     methodType: PaymentMethodType,
@@ -727,6 +800,21 @@ export default function App() {
   ) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
+
+    // Cek apakah batas waktu 20 menit sudah berakhir
+    if (
+      targetOrder.paymentStatus === 'Gagal' ||
+      targetOrder.status === 'Cancelled' ||
+      Date.now() >= targetOrder.expiresAt
+    ) {
+      handlePaymentFailed(orderId, methodType);
+      setPaymentModalOpen(false);
+      showToast(
+        'Waktu Pembayaran 20 Menit Berakhir (Gagal) ⏳',
+        'Maaf, batas waktu pembayaran 20 menit telah habis sehingga pesanan ini otomatis GAGAL dan tidak dapat dibayar lagi. Silakan buat booking baru.'
+      );
+      return;
+    }
 
     const details = getPaymentMethodDetails(methodType, targetOrder.wa);
     const isCash = methodType === 'cash';

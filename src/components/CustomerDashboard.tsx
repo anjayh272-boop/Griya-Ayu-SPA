@@ -7,6 +7,7 @@ import {
   AppNotification,
   PaymentMethodType,
   RefundRequestInfo,
+  ServiceGridCategory,
 } from '../types/index.ts';
 import {
   calculateOrderPricing,
@@ -71,6 +72,8 @@ interface CustomerDashboardProps {
     payMethodType: PaymentMethodType;
     markAsPaid: boolean;
     paymentProofImage?: string;
+    existingOrderId?: number | null;
+    silentReceipt?: boolean;
   }) => BookingOrder | null;
   onRequestRefund?: (orderId: number, refundInfo: RefundRequestInfo) => void;
   onCopyText?: (text: string, label: string) => void;
@@ -114,15 +117,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     return () => clearInterval(t);
   }, []);
 
-  // Service selection state (1 - 5 layanan satuan atau paket bundling)
+  // Service selection state (mulai dari 0 pilihan tanpa batasan maksimum)
   const [serviceMode, setServiceMode] = useState<'single' | 'package'>('single');
-  const [singleCategoryFilter, setSingleCategoryFilter] = useState<'all' | 'sport' | 'wellness'>(
-    'all'
-  );
+  const [selectedGridCategory, setSelectedGridCategory] = useState<'all' | ServiceGridCategory>('all');
   const [showPriceListImages, setShowPriceListImages] = useState<boolean>(false);
-  const [chosenSingleIds, setChosenSingleIds] = useState<string[]>(['s1']);
-  const [chosenPackageId, setChosenPackageId] = useState<string>('p1');
+  const [chosenSingleIds, setChosenSingleIds] = useState<string[]>([]);
+  const [chosenPackageId, setChosenPackageId] = useState<string>('');
   const [chosenInjurySpot, setChosenInjurySpot] = useState<string>('Lutut (Knee)');
+  const [isInjuryPickerOpen, setIsInjuryPickerOpen] = useState<boolean>(false);
 
   // Pilihan lokasi sesi: Studio vs Home Service (+Biaya Perjalanan)
   const [visitType, setVisitType] = useState<'studio' | 'home_service'>('studio');
@@ -139,7 +141,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   // Point reward selection (di Langkah 3)
   const [selectedRewardId, setSelectedRewardId] = useState<string>('none');
 
-  // State Pembayaran di Langkah 3 (QRIS Timer 20 Menit + Metode + Bukti Bayar)
+  // State Pembayaran di Langkah 3 (QRIS Timer 20 Menit + Metode + Bukti Bayar + ID Pesanan Pending di Riwayat)
+  const [step3PendingOrderId, setStep3PendingOrderId] = useState<number | null>(null);
   const [step3ExpiresAt, setStep3ExpiresAt] = useState<number>(() => Date.now() + 20 * 60 * 1000);
   const [step3MethodType, setStep3MethodType] = useState<PaymentMethodType>('qris');
   const [step3ProofImage, setStep3ProofImage] = useState<string>('');
@@ -350,27 +353,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   const toggleSingleItem = (id: string) => {
     if (chosenSingleIds.includes(id)) {
-      if (chosenSingleIds.length === 1) {
-        onShowToast(
-          isEn ? 'Minimum 1 Service' : 'Pilih Minimal 1 Layanan',
-          isEn
-            ? 'Please select at least one treatment service.'
-            : 'Pilih minimal satu layanan terapi untuk melanjutkan jadwal.'
-        );
-        return;
+      const updated = chosenSingleIds.filter((item) => item !== id);
+      setChosenSingleIds(updated);
+      if (!updated.includes('s2') && !updated.includes('s4')) {
+        setIsInjuryPickerOpen(false);
       }
-      setChosenSingleIds(chosenSingleIds.filter((item) => item !== id));
     } else {
-      if (chosenSingleIds.length >= 5) {
-        onShowToast(
-          isEn ? 'Maximum 5 Services' : 'Maksimal 5 Layanan',
-          isEn
-            ? 'You can select up to 5 single treatments in one session.'
-            : 'Anda dapat memilih maksimal 5 layanan terapi satuan sekaligus dalam 1 sesi.'
-        );
-        return;
+      const updated = [...chosenSingleIds, id];
+      setChosenSingleIds(updated);
+      if (id === 's2' || id === 's4') {
+        setIsInjuryPickerOpen(true);
       }
-      setChosenSingleIds([...chosenSingleIds, id]);
     }
   };
 
@@ -406,18 +399,32 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   // Dari Langkah 1 -> Langkah 2
   const handleGoToStep2 = () => {
-    if (serviceMode === 'single' && chosenSingleIds.length === 0) {
+    if (
+      (serviceMode === 'single' && chosenSingleIds.length === 0) ||
+      (serviceMode === 'package' && !chosenPackageId)
+    ) {
       onShowToast(
         'Pilih Layanan Terapi',
-        'Silakan pilih minimal 1 layanan sebelum lanjut ke pemilihan jadwal.'
+        'Silakan pilih minimal 1 layanan terlebih dahulu sebelum lanjut ke pemilihan jadwal.'
       );
       return;
     }
     goToStep(2);
   };
 
-  // Dari Langkah 2 -> Langkah 3
+  // Dari Langkah 2 -> Langkah 3 (Otomatis simpan ke Bar Riwayat sebagai Pending 20 Menit agar tidak hilang jika aplikasi ke-close / ke-refresh)
   const handleGoToStep3 = () => {
+    if (
+      (serviceMode === 'single' && chosenSingleIds.length === 0) ||
+      (serviceMode === 'package' && !chosenPackageId)
+    ) {
+      goToStep(1);
+      onShowToast(
+        'Pilih Layanan Terapi',
+        'Silakan pilih minimal 1 layanan terlebih dahulu sebelum lanjut ke pembayaran.'
+      );
+      return;
+    }
     if (isDatePast(selectedDateIso, nowMs)) {
       onShowToast(
         'Tanggal Sudah Terlewat',
@@ -442,7 +449,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       );
       return;
     }
-    setStep3ExpiresAt(Date.now() + 20 * 60 * 1000);
+
+    if (onConfirmWizardBooking) {
+      const savedPending = onConfirmWizardBooking({
+        total: pricing.finalPrice,
+        scheduleDatePretty: selectedDatePretty,
+        scheduleDateIso: selectedDateIso,
+        selectedTimeSlot,
+        itemsSummary: finalItemsSummary,
+        pointsEarned: pricing.pts,
+        pointsRedeemedCost: pricing.rewardObj.cost,
+        payMethodType: step3MethodType,
+        markAsPaid: false,
+        existingOrderId: step3PendingOrderId,
+        silentReceipt: true,
+      });
+      if (savedPending) {
+        setStep3PendingOrderId(savedPending.id);
+        setStep3ExpiresAt(savedPending.expiresAt);
+      } else {
+        setStep3ExpiresAt(Date.now() + 20 * 60 * 1000);
+      }
+    } else {
+      setStep3ExpiresAt(Date.now() + 20 * 60 * 1000);
+    }
+
     goToStep(3);
   };
 
@@ -450,6 +481,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const handleConfirmStep3Payment = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedTimeSlot) return;
+
+    // Jika batas waktu 20 menit sudah berakhir -> tidak bisa melakukan pembayaran lagi (Gagal)
+    if (Date.now() >= step3ExpiresAt) {
+      onShowToast(
+        'Waktu Pembayaran 20 Menit Berakhir (Gagal) ⏳',
+        'Maaf, batas waktu pembayaran 20 menit telah berakhir sehingga Anda tidak dapat melakukan pembayaran lagi pada pesanan ini. Silakan pilih jadwal kembali.'
+      );
+      return;
+    }
 
     if (isDatePast(selectedDateIso, nowMs) || isTimeSlotPast(selectedDateIso, selectedTimeSlot, nowMs)) {
       setSelectedTimeSlot(null);
@@ -473,9 +513,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       return;
     }
 
-    // Aktifkan timer 20 menit & langsung kunci jadwal secara permanen
-    setStep3ExpiresAt(Date.now() + 20 * 60 * 1000);
-
     if (onConfirmWizardBooking) {
       const createdOrder = onConfirmWizardBooking({
         total: pricing.finalPrice,
@@ -488,12 +525,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         payMethodType: step3MethodType,
         markAsPaid: true,
         paymentProofImage: requiresProof ? step3ProofImage : undefined,
+        existingOrderId: step3PendingOrderId,
+        silentReceipt: false,
       });
 
       if (createdOrder) {
         // Reset kembali ke Langkah 1 untuk pemesanan berikutnya (Struk Digital langsung terbuka otomatis)
         setBookingStep(1);
+        setChosenSingleIds([]);
+        setChosenPackageId('');
+        setIsInjuryPickerOpen(false);
         setSelectedTimeSlot(null);
+        setStep3PendingOrderId(null);
         setStep3ProofImage('');
         setStep3ProofError('');
       }
@@ -541,22 +584,22 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   return (
     <div className="flex-1 flex flex-col pb-28">
       {/* ================================================================= */}
-      {/* HEADER ATAS RINGKAS & BERSIH (TANPA KOTAK POIN BERLEBIH)          */}
+      {/* HEADER ATAS RINGKAS & JELAS                                       */}
       {/* ================================================================= */}
-      <header className="bg-gradient-to-b from-[#0B261C] via-[#0f3326] to-[#144533] text-white px-4 py-3.5 rounded-b-3xl shadow-md border-b border-[#D4AF37]/50">
-        <div className="flex justify-between items-center gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+      <header className="bg-gradient-to-b from-[#0B261C] via-[#0f3326] to-[#144533] text-white px-3.5 py-2.5 rounded-b-3xl shadow-md border-b border-[#D4AF37]/50">
+        <div className="flex justify-between items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <GriyaAyuLogo size="sm" showBadge={false} floating={true} />
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <h1 className="font-brand text-sm font-bold tracking-wider text-[#D4AF37] truncate">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h1 className="font-brand text-sm sm:text-base font-bold tracking-wide text-[#D4AF37] whitespace-nowrap leading-tight">
                   GRIYA AYU
                 </h1>
-                <span className="text-[9px] bg-[#D4AF37]/20 border border-[#D4AF37]/60 text-amber-300 px-1.5 py-0.5 rounded-md font-black">
+                <span className="text-[9px] leading-none bg-[#D4AF37]/20 border border-[#D4AF37]/60 text-amber-300 px-1.5 py-0.5 rounded font-black whitespace-nowrap flex-shrink-0">
                   AIFMO-P
                 </span>
               </div>
-              <p className="text-[11px] text-emerald-100/80 font-medium truncate mt-0.5">
+              <p className="text-[11px] text-emerald-100/90 font-medium truncate mt-0.5">
                 <i className="fa-solid fa-location-dot text-amber-400 mr-1"></i>
                 Graha Cipta 5 Blok E7 No.3
               </p>
@@ -564,14 +607,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </div>
 
           {/* Kanan Atas: Maps Cepat & Lonceng Notifikasi */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <a
               href={GRIYA_AYU_MAPS_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="tactile-btn bg-black/30 hover:bg-black/50 border border-[#D4AF37]/50 text-amber-300 text-[10px] font-black px-2.5 py-2 rounded-xl flex items-center gap-1.5"
+              className="tactile-btn bg-black/30 hover:bg-black/50 border border-[#D4AF37]/50 text-amber-300 text-[11px] font-extrabold px-2.5 py-1.5 rounded-xl flex items-center gap-1 whitespace-nowrap"
             >
-              <i className="fa-solid fa-map-location-dot"></i>
+              <i className="fa-solid fa-map-location-dot text-xs"></i>
               <span>Maps</span>
             </a>
 
@@ -579,7 +622,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               type="button"
               onClick={handleOpenNotifTab}
               aria-label="Buka Bar Notifikasi Pelanggan"
-              className="tactile-btn relative w-9 h-9 rounded-xl bg-black/30 hover:bg-black/50 border border-[#D4AF37]/50 text-[#D4AF37] flex items-center justify-center"
+              className="tactile-btn relative w-9 h-9 rounded-xl bg-black/30 hover:bg-black/50 border border-[#D4AF37]/50 text-[#D4AF37] flex items-center justify-center flex-shrink-0"
             >
               <i className="fa-solid fa-bell text-xs"></i>
               {unreadNotifCount > 0 && (
@@ -593,24 +636,24 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
         {/* Banner Peringatan Jika Ada Pembayaran yang Masih Pending (20 Menit) */}
         {pendingUserBookings.length > 0 && (
-          <div className="mt-3 bg-amber-400 text-[#0B261C] px-3.5 py-2.5 rounded-2xl flex items-center justify-between gap-2.5 shadow-sm border border-amber-200">
+          <div className="mt-2.5 bg-amber-400 text-[#0B261C] px-3.5 py-2.5 rounded-2xl flex items-center justify-between gap-2.5 shadow-sm border border-amber-200">
             <div className="flex items-center gap-2 min-w-0">
-              <i className="fa-solid fa-stopwatch text-sm animate-bounce flex-shrink-0"></i>
+              <i className="fa-solid fa-stopwatch text-base animate-bounce flex-shrink-0"></i>
               <div className="truncate">
-                <span className="text-[11px] font-black block leading-tight">
-                  ⏳ Menunggu Pembayaran ({formatCountdown(pendingUserBookings[0].expiresAt - nowMs)})
+                <span className="text-xs font-black block leading-tight">
+                  ⏳ Menunggu Bayar ({formatCountdown(pendingUserBookings[0].expiresAt - nowMs)})
                 </span>
-                <span className="text-[10px] font-bold block truncate">
-                  Jam {pendingUserBookings[0].time} WIB belum terkunci. Bayar di Struk!
+                <span className="text-xs font-bold block truncate">
+                  Jam {pendingUserBookings[0].time} WIB belum terkunci
                 </span>
               </div>
             </div>
             <button
               type="button"
               onClick={() => onViewReceipt(pendingUserBookings[0])}
-              className="tactile-btn bg-[#0B261C] text-[#D4AF37] text-[10px] font-black px-3 py-2 rounded-xl flex-shrink-0 shadow-xs"
+              className="tactile-btn bg-[#0B261C] text-[#D4AF37] text-xs font-black px-3 py-2 rounded-xl flex-shrink-0 shadow-xs"
             >
-              Buka Struk
+              Bayar
             </button>
           </div>
         )}
@@ -620,436 +663,574 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       {/* TAB 1: STEP-BY-STEP WIZARD BOOKING (3 LANGKAH BERTAHAP)           */}
       {/* ================================================================= */}
       {customerTab === 'booking' && (
-        <div className="p-4 space-y-4 animate-page-enter">
-          {/* PROGRESS BAR WIZARD 3 LANGKAH (HIJAU - EMAS GRIYA AYU) */}
-          <div className="bg-[#0B261C] p-3 rounded-2xl border border-[#D4AF37]/60 shadow-md">
-            <div className="grid grid-cols-3 gap-2">
-              {/* Step 1 Indicator */}
-              <button
-                type="button"
-                onClick={() => goToStep(1)}
-                className={`tactile-btn py-2.5 px-2.5 rounded-xl flex items-center gap-2 text-left transition ${
-                  bookingStep === 1
-                    ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-sm'
-                    : bookingStep > 1
-                    ? 'bg-emerald-900/90 text-amber-300 border border-[#D4AF37]/40'
-                    : 'bg-white/10 text-stone-300'
-                }`}
-              >
-                <span
-                  className={`w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center flex-shrink-0 ${
-                    bookingStep === 1
-                      ? 'bg-[#0B261C] text-[#D4AF37]'
-                      : bookingStep > 1
-                      ? 'bg-[#D4AF37] text-[#0B261C]'
-                      : 'bg-black/40 text-stone-300'
-                  }`}
-                >
-                  {bookingStep > 1 ? '✓' : '1'}
-                </span>
-                <div className="min-w-0">
-                  <span className="text-[8px] font-black uppercase block opacity-80 leading-none">
-                    Langkah 1
-                  </span>
-                  <span className="text-[11px] font-extrabold block truncate leading-tight mt-0.5">
-                    Layanan
-                  </span>
-                </div>
-              </button>
+        <div className="p-3.5 space-y-3 animate-page-enter">
+          {/* PROGRESS BAR WIZARD 3 LANGKAH RINGKAS & JELAS */}
+          <div className="bg-[#0B261C] p-1.5 rounded-2xl border border-[#D4AF37]/60 shadow-sm grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => goToStep(1)}
+              className={`tactile-btn py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 text-xs sm:text-sm font-black transition ${
+                bookingStep === 1
+                  ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-xs'
+                  : bookingStep > 1
+                  ? 'bg-emerald-900/90 text-amber-300'
+                  : 'text-stone-300'
+              }`}
+            >
+              <span>{bookingStep > 1 ? '✓' : '1.'}</span>
+              <span>Layanan</span>
+            </button>
 
-              {/* Step 2 Indicator */}
-              <button
-                type="button"
-                onClick={() => handleGoToStep2()}
-                className={`tactile-btn py-2.5 px-2.5 rounded-xl flex items-center gap-2 text-left transition ${
-                  bookingStep === 2
-                    ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-sm'
-                    : bookingStep > 2
-                    ? 'bg-emerald-900/90 text-amber-300 border border-[#D4AF37]/40'
-                    : 'bg-white/10 text-stone-300'
-                }`}
-              >
-                <span
-                  className={`w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center flex-shrink-0 ${
-                    bookingStep === 2
-                      ? 'bg-[#0B261C] text-[#D4AF37]'
-                      : bookingStep > 2
-                      ? 'bg-[#D4AF37] text-[#0B261C]'
-                      : 'bg-black/40 text-stone-300'
-                  }`}
-                >
-                  {bookingStep > 2 ? '✓' : '2'}
-                </span>
-                <div className="min-w-0">
-                  <span className="text-[8px] font-black uppercase block opacity-80 leading-none">
-                    Langkah 2
-                  </span>
-                  <span className="text-[11px] font-extrabold block truncate leading-tight mt-0.5">
-                    Jadwal
-                  </span>
-                </div>
-              </button>
+            <button
+              type="button"
+              onClick={() => handleGoToStep2()}
+              className={`tactile-btn py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 text-xs sm:text-sm font-black transition ${
+                bookingStep === 2
+                  ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-xs'
+                  : bookingStep > 2
+                  ? 'bg-emerald-900/90 text-amber-300'
+                  : 'text-stone-300'
+              }`}
+            >
+              <span>{bookingStep > 2 ? '✓' : '2.'}</span>
+              <span>Jadwal</span>
+            </button>
 
-              {/* Step 3 Indicator */}
-              <button
-                type="button"
-                onClick={() => handleGoToStep3()}
-                className={`tactile-btn py-2.5 px-2.5 rounded-xl flex items-center gap-2 text-left transition ${
-                  bookingStep === 3
-                    ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-sm'
-                    : 'bg-white/10 text-stone-300'
-                }`}
-              >
-                <span
-                  className={`w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center flex-shrink-0 ${
-                    bookingStep === 3
-                      ? 'bg-[#0B261C] text-[#D4AF37]'
-                      : 'bg-black/40 text-stone-300'
-                  }`}
-                >
-                  3
-                </span>
-                <div className="min-w-0">
-                  <span className="text-[8px] font-black uppercase block opacity-80 leading-none">
-                    Langkah 3
-                  </span>
-                  <span className="text-[11px] font-extrabold block truncate leading-tight mt-0.5">
-                    Bayar
-                  </span>
-                </div>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => handleGoToStep3()}
+              className={`tactile-btn py-2 px-2 rounded-xl flex items-center justify-center gap-1.5 text-xs sm:text-sm font-black transition ${
+                bookingStep === 3
+                  ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-xs'
+                  : 'text-stone-300'
+              }`}
+            >
+              <span>3.</span>
+              <span>Bayar</span>
+            </button>
           </div>
 
           {/* =============================================================== */}
-          {/* WIZARD LANGKAH 1: PILIH LAYANAN (1 - 5 SATUAN ATAU BUNDLING)    */}
+          {/* WIZARD LANGKAH 1: GRID ICON CARD ALA TRAVELOKA & KARTU LAYANAN  */}
           {/* =============================================================== */}
           {bookingStep === 1 && (
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-stone-200/90 space-y-3.5 animate-page-enter">
-              <div className="flex justify-between items-start gap-2">
-                <div>
-                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                    {isEn ? 'Step 1 of 3 • Select Treatment' : 'Langkah 1 dari 3 • Pilih Layanan'}
-                  </span>
-                  <h2 className="text-sm font-black text-[#0B261C] leading-snug mt-0.5">
-                    {isEn
-                      ? 'Choose Services (1 – 5 Items or Bundle)'
-                      : 'Pilih Layanan Terapi (1 – 5 Layanan)'}
+            <div className="space-y-3 animate-page-enter">
+              {/* 1. GRID KATEGORI UTAMA (GRID ICON CARD 2 BARIS X 3 KOLOM ALA TRAVELOKA) */}
+              <div className="bg-white p-3.5 rounded-3xl shadow-sm border border-stone-200/90 space-y-2.5">
+                <div className="flex justify-between items-center gap-2">
+                  <h2 className="text-base font-black text-[#0B261C]">
+                    {isEn ? 'Treatment Categories' : 'Pilih Kategori Terapi'}
                   </h2>
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
                     type="button"
                     onClick={() => setShowPriceListImages(!showPriceListImages)}
-                    className="tactile-btn text-[10px] font-black bg-amber-100 hover:bg-amber-200 text-[#0B261C] px-2.5 py-1 rounded-xl border border-amber-300 flex items-center gap-1"
+                    className="tactile-btn text-xs font-black bg-amber-50 hover:bg-amber-100 text-[#0B261C] px-3 py-1.5 rounded-xl border border-amber-300 flex items-center gap-1.5 flex-shrink-0"
                   >
                     <i className="fa-solid fa-image text-amber-700"></i>
-                    <span>{showPriceListImages ? 'Tutup Brosur' : 'Brosur'}</span>
-                  </button>
-                  <span className="text-[10px] font-black bg-emerald-100 text-emerald-950 px-2.5 py-1 rounded-xl border border-emerald-300">
-                    {serviceMode === 'single'
-                      ? `${chosenSingleIds.length}/5`
-                      : 'Paket'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Info Ringkas: Willness Khusus Wanita & Home Service */}
-              <div className="bg-stone-50 border border-stone-200/90 p-3 rounded-2xl space-y-1.5 text-[11px] leading-relaxed">
-                <p className="font-bold text-[#0B261C] flex items-start gap-2">
-                  <i className="fa-solid fa-venus text-pink-600 mt-0.5 flex-shrink-0"></i>
-                  <span>
-                    <b>Willness Massage Khusus Wanita:</b> Seluruh layanan kategori Willness
-                    dilayani khusus bagi pelanggan wanita.
-                  </span>
-                </p>
-                <p className="font-medium text-stone-600 flex items-start gap-2">
-                  <i className="fa-solid fa-car-side text-emerald-700 mt-0.5 flex-shrink-0"></i>
-                  <span>
-                    <b>Melayani Studio & Home Service:</b> Panggilan ke rumah dikenakan tambahan
-                    biaya perjalanan.
-                  </span>
-                </p>
-              </div>
-
-              {/* Brosur Price List Resmi (Sport Massage & Willness Massage) */}
-              {showPriceListImages && (
-                <div className="p-3 rounded-2xl bg-stone-900 text-white space-y-2.5 border border-[#D4AF37]/60 animate-page-enter">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-black text-[#D4AF37]">
-                      📋 Brosur Price List Resmi Griya Ayu
-                    </span>
-                    <span className="text-[10px] text-emerald-200 font-bold">
-                      Studio & Home Service
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div className="space-y-1">
-                      <img
-                        src="/assets/aistudio/image_2b8cf505.png"
-                        alt="Price List Griya Ayu Sport Massage"
-                        className="w-full rounded-xl border border-[#D4AF37]/40 object-cover"
-                      />
-                      <p className="text-[10px] text-center font-bold text-amber-200">
-                        Sport Massage
-                      </p>
-                    </div>
-                    <div className="space-y-1">
-                      <img
-                        src="/assets/aistudio/image_2d1f81d9.png"
-                        alt="Price List Griya Ayu Willness Massage"
-                        className="w-full rounded-xl border border-[#D4AF37]/40 object-cover"
-                      />
-                      <p className="text-[10px] text-center font-bold text-pink-200">
-                        Willness (Khusus Wanita)
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Switch Mode: Satuan (1 - 5) vs Paket Bundling */}
-              <div className="flex bg-stone-100 p-1 rounded-2xl text-xs font-black">
-                <button
-                  type="button"
-                  onClick={() => setServiceMode('single')}
-                  className={`tactile-btn flex-1 py-2.5 rounded-xl transition ${
-                    serviceMode === 'single'
-                      ? 'bg-[#0B261C] text-[#D4AF37] shadow-sm'
-                      : 'text-stone-500 hover:text-stone-800'
-                  }`}
-                >
-                  {isEn ? 'Single Services (1 - 5)' : 'Layanan Satuan (1 - 5)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setServiceMode('package')}
-                  className={`tactile-btn flex-1 py-2.5 rounded-xl transition ${
-                    serviceMode === 'package'
-                      ? 'bg-[#0B261C] text-[#D4AF37] shadow-sm'
-                      : 'text-stone-500 hover:text-stone-800'
-                  }`}
-                >
-                  🔥 {isEn ? 'Bundle Packages' : 'Paket Bundling'}
-                </button>
-              </div>
-
-              {/* Filter Kategori Layanan Satuan: Semua vs Sport Massage vs Willness (Khusus Wanita) */}
-              {serviceMode === 'single' && (
-                <div className="grid grid-cols-3 gap-2 text-[11px] font-black">
-                  <button
-                    type="button"
-                    onClick={() => setSingleCategoryFilter('all')}
-                    className={`tactile-btn py-2 px-2 rounded-xl border transition ${
-                      singleCategoryFilter === 'all'
-                        ? 'bg-emerald-900 text-amber-300 border-emerald-950 shadow-xs'
-                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    Semua ({SINGLE_CATALOG.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSingleCategoryFilter('sport')}
-                    className={`tactile-btn py-2 px-2 rounded-xl border transition ${
-                      singleCategoryFilter === 'sport'
-                        ? 'bg-emerald-900 text-amber-300 border-emerald-950 shadow-xs'
-                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    💪 Sport
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSingleCategoryFilter('wellness')}
-                    className={`tactile-btn py-2 px-2 rounded-xl border transition ${
-                      singleCategoryFilter === 'wellness'
-                        ? 'bg-emerald-900 text-amber-300 border-emerald-950 shadow-xs'
-                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    🌸 Willness
+                    <span>{showPriceListImages ? 'Tutup Brosur' : 'Brosur Harga'}</span>
                   </button>
                 </div>
-              )}
 
-              {/* Daftar Pilihan Layanan (Scrollable internal agar halaman tetap ringkas) */}
-              {serviceMode === 'single' ? (
-                <div className="space-y-2.5 max-h-[42vh] overflow-y-auto pr-1">
-                  {SINGLE_CATALOG.filter((item) =>
-                    singleCategoryFilter === 'all' ? true : item.category === singleCategoryFilter
-                  ).map((s) => {
-                    const isSelected = chosenSingleIds.includes(s.id);
-                    const isSport = s.category === 'sport';
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => toggleSingleItem(s.id)}
-                        className={`tactile-btn w-full p-3.5 rounded-2xl border-2 text-left cursor-pointer flex justify-between items-center gap-3 transition shadow-xs ${
-                          isSelected
-                            ? 'border-[#0B261C] bg-emerald-50/80 shadow-sm'
-                            : 'border-stone-200/90 bg-white hover:border-emerald-700/40'
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span
-                              className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
-                                isSport
-                                  ? 'bg-[#0B261C] text-[#D4AF37]'
-                                  : 'bg-pink-100 text-pink-900 border border-pink-300'
-                              }`}
-                            >
-                              {isSport ? 'Sport' : '🌸 Khusus Wanita'}
-                            </span>
-                            <span className="text-[10px] font-black bg-stone-100 text-stone-700 border border-stone-200 px-2 py-0.5 rounded-md inline-flex items-center gap-1">
-                              <i className="fa-regular fa-clock text-[9px] text-emerald-700"></i>
-                              {s.duration}
-                            </span>
-                            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md">
-                              +{s.points} Poin
-                            </span>
-                          </div>
-                          <h3 className="font-black text-xs sm:text-sm text-[#0B261C] leading-snug">
-                            {s.name}
-                          </h3>
-                          <p className="text-[11px] text-stone-500 leading-relaxed line-clamp-2">
-                            {s.desc}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2.5 flex-shrink-0">
-                          <div className="text-right">
-                            <span className="font-black text-xs sm:text-sm text-[#0B261C] block">
-                              {formatRupiah(s.price)}
-                            </span>
-                          </div>
-                          <div
-                            className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-transform ${
-                              isSelected
-                                ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37]'
-                                : 'border-stone-300 text-transparent'
-                            }`}
-                          >
-                            <i className="fa-solid fa-check text-xs"></i>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                /* List Paket Bundling */
-                <div className="space-y-2.5 max-h-[42vh] overflow-y-auto pr-1">
-                  {PACKAGE_CATALOG.map((p) => {
-                    const isSelected = chosenPackageId === p.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setChosenPackageId(p.id)}
-                        className={`tactile-btn w-full p-3.5 rounded-2xl border-2 text-left cursor-pointer flex justify-between items-center gap-3 transition shadow-xs ${
-                          isSelected
-                            ? 'border-[#0B261C] bg-amber-50/80 shadow-sm'
-                            : 'border-stone-200/90 bg-white hover:border-amber-400'
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-[#0B261C] text-[#D4AF37]">
-                              {p.tag}
-                            </span>
-                            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-md">
-                              +{p.points} Poin
-                            </span>
-                          </div>
-                          <h3 className="font-black text-xs sm:text-sm text-[#0B261C] leading-snug">
-                            {p.name}
-                          </h3>
-                          <p className="text-[11px] text-stone-500 leading-relaxed line-clamp-2">
-                            <b>{p.duration}</b> • {p.desc}
-                          </p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          {p.normalPrice && (
-                            <span className="text-[10px] line-through text-stone-400 block">
-                              {formatRupiah(p.normalPrice)}
-                            </span>
-                          )}
-                          <p className="font-black text-xs sm:text-sm text-[#0B261C]">
-                            {formatRupiah(p.price)}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Pemilih Anatomi Titik Cedera (muncul jika Injury Muscle atau Dry Needle dipilih) */}
-              {serviceMode === 'single' &&
-                (chosenSingleIds.includes('s2') || chosenSingleIds.includes('s4')) && (
-                  <div className="p-3.5 border border-amber-300 bg-amber-50/80 rounded-2xl space-y-2 animate-page-enter">
-                    <p className="text-xs font-black text-[#0B261C] flex items-center gap-1.5">
-                      <i className="fa-solid fa-person-running text-amber-600"></i>
-                      <span>
-                        {isEn
-                          ? 'Select Injury / Nerve Area:'
-                          : 'Pilih Titik Keluhan Cedera / Saraf:'}
-                      </span>
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {ANATOMY_LOCATIONS.map((loc) => {
-                        const isLocActive = chosenInjurySpot === loc;
-                        return (
-                          <button
-                            key={loc}
-                            type="button"
-                            onClick={() => setChosenInjurySpot(loc)}
-                            className={`tactile-btn text-[11px] font-bold px-2.5 py-1.5 rounded-xl border transition ${
-                              isLocActive
-                                ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C] shadow-xs'
-                                : 'bg-white text-stone-700 border-stone-300 hover:bg-stone-50'
-                            }`}
-                          >
-                            {loc}
-                          </button>
-                        );
-                      })}
+                {/* Brosur Price List Resmi (Collapsible) */}
+                {showPriceListImages && (
+                  <div className="p-3 rounded-2xl bg-stone-900 text-white space-y-2 border border-[#D4AF37]/60 animate-page-enter">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div className="space-y-1">
+                        <img
+                          src="/assets/aistudio/image_2b8cf505.png"
+                          alt="Price List Griya Ayu Sport Massage"
+                          className="w-full rounded-xl border border-[#D4AF37]/40 object-cover"
+                        />
+                        <p className="text-xs text-center font-bold text-amber-200">
+                          Semua Gender (👨👩)
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <img
+                          src="/assets/aistudio/image_2d1f81d9.png"
+                          alt="Price List Griya Ayu Willness Massage"
+                          className="w-full rounded-xl border border-[#D4AF37]/40 object-cover"
+                        />
+                        <p className="text-xs text-center font-bold text-pink-200">
+                          Khusus Wanita (👩)
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
 
-              {/* Footer Ringkasan Langkah 1 & Tombol Utama Luxury Gold */}
-              <div className="pt-3 border-t border-stone-200 space-y-3">
-                <div className="bg-[#0B261C] text-white p-3.5 rounded-2xl flex justify-between items-center border border-[#D4AF37]/50 shadow-sm">
-                  <div className="min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-emerald-300 font-bold block">
-                      Layanan Dipilih (
-                      {serviceMode === 'single' ? `${chosenSingleIds.length} Item` : 'Paket'}):
+                {/* Grid 2 Baris x 3 Kolom Ikon Bulat Berwarna ala Traveloka */}
+                <div className="grid grid-cols-3 gap-2">
+                  {/* Kategori 1: Pijat Kebugaran */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedGridCategory(
+                        selectedGridCategory === 'kebugaran' ? 'all' : 'kebugaran'
+                      )
+                    }
+                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                      selectedGridCategory === 'kebugaran'
+                        ? 'bg-sky-50 border-sky-500 ring-2 ring-sky-500/25'
+                        : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 text-white flex items-center justify-center shadow-sm">
+                      <i className="fa-solid fa-hands-holding-circle text-lg"></i>
+                    </div>
+                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                      Pijat Kebugaran
                     </span>
-                    <p className="text-xs font-extrabold text-white truncate mt-0.5">
-                      {pricing.titleStr}
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <span className="text-sm font-black text-[#D4AF37] block">
-                      {formatRupiah(pricing.subtotal)}
+                  </button>
+
+                  {/* Kategori 2: Terapi Otot & Cedera */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedGridCategory(
+                        selectedGridCategory === 'otot_cedera' ? 'all' : 'otot_cedera'
+                      )
+                    }
+                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                      selectedGridCategory === 'otot_cedera'
+                        ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/25'
+                        : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-400 to-red-500 text-white flex items-center justify-center shadow-sm">
+                      <i className="fa-solid fa-person-running text-lg"></i>
+                    </div>
+                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                      Terapi Otot & Cedera
                     </span>
-                    <span className="text-[10px] font-extrabold text-emerald-300">
-                      +{pricing.pts} Poin
+                  </button>
+
+                  {/* Kategori 3: Spa Perawatan Tubuh */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedGridCategory(
+                        selectedGridCategory === 'spa_tubuh' ? 'all' : 'spa_tubuh'
+                      )
+                    }
+                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                      selectedGridCategory === 'spa_tubuh'
+                        ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/25'
+                        : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-sm">
+                      <i className="fa-solid fa-spa text-lg"></i>
+                    </div>
+                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                      Spa Perawatan Tubuh
                     </span>
-                  </div>
+                  </button>
+
+                  {/* Kategori 4: Terapi Bekam */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedGridCategory(
+                        selectedGridCategory === 'bekam' ? 'all' : 'bekam'
+                      )
+                    }
+                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                      selectedGridCategory === 'bekam'
+                        ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/25'
+                        : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center shadow-sm">
+                      <i className="fa-solid fa-heart-pulse text-lg"></i>
+                    </div>
+                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                      Terapi Bekam
+                    </span>
+                  </button>
+
+                  {/* Kategori 5: Khusus Wanita */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedGridCategory(
+                        selectedGridCategory === 'khusus_wanita' ? 'all' : 'khusus_wanita'
+                      )
+                    }
+                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                      selectedGridCategory === 'khusus_wanita'
+                        ? 'bg-pink-50 border-pink-500 ring-2 ring-pink-500/25'
+                        : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
+                    }`}
+                  >
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pink-400 to-rose-600 text-white flex items-center justify-center shadow-sm">
+                      <i className="fa-solid fa-venus text-lg"></i>
+                    </div>
+                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                      Khusus Wanita
+                    </span>
+                  </button>
+
+                  {/* Kategori 6: Tanya Admin WA */}
+                  <a
+                    href={`https://wa.me/6285183110392?text=${encodeURIComponent(
+                      `Halo Admin Griya Ayu, saya ${currentUser.name} (${currentUser.phone}) ingin konsultasi memilih terapi yang cocok sebelum booking.`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] text-white flex items-center justify-center shadow-sm">
+                      <i className="fa-brands fa-whatsapp text-xl"></i>
+                    </div>
+                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                      Tanya Admin WA
+                    </span>
+                  </a>
+                </div>
+              </div>
+
+              {/* 2. KARTU LAYANAN DI BAWAH GRID (RAPI, JELAS, FONT BESAR) */}
+              <div className="bg-white p-3.5 rounded-3xl shadow-sm border border-stone-200/90 space-y-3">
+                {/* Bar Judul Kategori Aktif & Reset Semua Layanan */}
+                <div className="flex justify-between items-center gap-2">
+                  <h3 className="text-base font-black text-[#0B261C] truncate">
+                    {selectedGridCategory === 'all' && 'Daftar Layanan Terapi'}
+                    {selectedGridCategory === 'kebugaran' && 'Pijat Kebugaran (👨👩)'}
+                    {selectedGridCategory === 'otot_cedera' && 'Terapi Otot & Cedera'}
+                    {selectedGridCategory === 'spa_tubuh' && 'Spa Perawatan Tubuh'}
+                    {selectedGridCategory === 'bekam' && 'Terapi Bekam'}
+                    {selectedGridCategory === 'khusus_wanita' && 'Khusus Wanita (👩)'}
+                  </h3>
+                  {selectedGridCategory !== 'all' ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGridCategory('all')}
+                      className="tactile-btn text-xs font-black text-emerald-950 bg-emerald-100 hover:bg-emerald-200 px-3 py-1 rounded-xl border border-emerald-300 flex-shrink-0"
+                    >
+                      Lihat Semua
+                    </button>
+                  ) : (
+                    <span className="text-xs font-black bg-emerald-100 text-emerald-950 px-2.5 py-1 rounded-xl border border-emerald-300 flex-shrink-0">
+                      {serviceMode === 'single'
+                        ? `${chosenSingleIds.length} Dipilih`
+                        : chosenPackageId
+                        ? '1 Paket'
+                        : '0 Dipilih'}
+                    </span>
+                  )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleGoToStep2}
-                  className="tactile-btn gold-shimmer-card w-full min-h-[48px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3.5 px-5 rounded-2xl shadow-md border border-amber-200 text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2"
-                >
-                  <span>Lanjut ke Pilih Jadwal</span>
-                  <i className="fa-solid fa-arrow-right"></i>
-                </button>
+                {/* Switch Mode: Layanan Satuan vs Paket Hemat */}
+                <div className="flex bg-stone-100 p-1 rounded-2xl text-xs sm:text-sm font-black">
+                  <button
+                    type="button"
+                    onClick={() => setServiceMode('single')}
+                    className={`tactile-btn flex-1 py-2 rounded-xl transition ${
+                      serviceMode === 'single'
+                        ? 'bg-[#0B261C] text-[#D4AF37] shadow-sm'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    {isEn ? 'Single Services' : 'Layanan Satuan'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServiceMode('package')}
+                    className={`tactile-btn flex-1 py-2 rounded-xl transition ${
+                      serviceMode === 'package'
+                        ? 'bg-[#0B261C] text-[#D4AF37] shadow-sm'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    🔥 {isEn ? 'Bundle Packages' : 'Paket Hemat'}
+                  </button>
+                </div>
+
+                {/* Daftar Kartu Layanan Ringkas & Mudah Dibaca */}
+                {serviceMode === 'single' ? (
+                  <div className="space-y-2.5">
+                    {SINGLE_CATALOG.filter((item) => {
+                      if (selectedGridCategory === 'all') return true;
+                      return item.gridCategories?.includes(selectedGridCategory);
+                    }).map((s) => {
+                      const isSelected = chosenSingleIds.includes(s.id);
+                      const isFemaleOnly = s.gender === 'female';
+                      const badgeLabel =
+                        s.genderBadge || (isFemaleOnly ? '👩 Khusus Wanita' : '👨👩 Semua Gender');
+
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => toggleSingleItem(s.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleSingleItem(s.id);
+                            }
+                          }}
+                          className={`tactile-btn w-full p-3.5 rounded-2xl border-2 text-left cursor-pointer flex justify-between items-center gap-3 transition ${
+                            isSelected
+                              ? 'border-[#0B261C] bg-emerald-50/90 shadow-sm'
+                              : 'border-stone-200 bg-white hover:border-emerald-700/40'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            {/* Nama Layanan (Font Besar & Jelas) */}
+                            <h4 className="font-extrabold text-sm sm:text-base text-[#0B261C] leading-snug">
+                              {s.name}
+                            </h4>
+
+                            {/* Baris Info Ringkas: Durasi & Badge Gender */}
+                            <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-stone-600">
+                              <span className="inline-flex items-center gap-1 text-stone-700">
+                                <i className="fa-regular fa-clock text-emerald-700"></i>
+                                {s.duration}
+                              </span>
+                              <span>•</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-extrabold ${
+                                  isFemaleOnly
+                                    ? 'bg-pink-100/90 text-pink-900'
+                                    : 'bg-sky-100/90 text-sky-950'
+                                }`}
+                              >
+                                {badgeLabel}
+                              </span>
+                              {isSelected && (s.id === 's2' || s.id === 's4') && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsInjuryPickerOpen(true);
+                                  }}
+                                  className="bg-amber-100 text-amber-950 border border-amber-300 px-2 py-0.5 rounded-md font-black inline-flex items-center gap-1"
+                                >
+                                  <span>🎯 {chosenInjurySpot}</span>
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Harga Besar & Poin */}
+                            <div className="flex items-center gap-2 pt-0.5">
+                              <span className="font-black text-sm sm:text-base text-emerald-900">
+                                {formatRupiah(s.price)}
+                              </span>
+                              <span className="text-xs font-extrabold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md">
+                                +{s.points} Poin
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Tombol Centang / Pilih Layanan Simpel */}
+                          <div
+                            className={`px-3.5 py-2.5 rounded-xl border-2 font-black text-xs sm:text-sm flex items-center gap-1.5 flex-shrink-0 transition ${
+                              isSelected
+                                ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37] shadow-xs'
+                                : 'bg-stone-50 border-stone-300 text-[#0B261C]'
+                            }`}
+                          >
+                            <i
+                              className={`fa-solid ${
+                                isSelected ? 'fa-circle-check text-[#D4AF37]' : 'fa-plus text-stone-500'
+                              }`}
+                            ></i>
+                            <span>{isSelected ? 'Terpilih' : 'Pilih'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* Daftar Paket Hemat di Bawah Grid */
+                  <div className="space-y-2.5">
+                    {PACKAGE_CATALOG.filter((p) => {
+                      if (selectedGridCategory === 'all') return true;
+                      return p.gridCategories?.includes(selectedGridCategory);
+                    }).map((p) => {
+                      const isSelected = chosenPackageId === p.id;
+                      const isFemaleOnly = p.gender === 'female';
+                      const badgeLabel =
+                        p.genderBadge || (isFemaleOnly ? '👩 Khusus Wanita' : '👨👩 Semua Gender');
+
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => setChosenPackageId(isSelected ? '' : p.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setChosenPackageId(isSelected ? '' : p.id);
+                            }
+                          }}
+                          className={`tactile-btn w-full p-3.5 rounded-2xl border-2 text-left cursor-pointer flex justify-between items-center gap-3 transition ${
+                            isSelected
+                              ? 'border-[#0B261C] bg-amber-50/90 shadow-sm'
+                              : 'border-stone-200 bg-white hover:border-amber-400'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <h4 className="font-extrabold text-sm sm:text-base text-[#0B261C] leading-snug">
+                              {p.name}
+                            </h4>
+
+                            <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-stone-600">
+                              <span className="inline-flex items-center gap-1 text-stone-700">
+                                <i className="fa-regular fa-clock text-emerald-700"></i>
+                                {p.duration}
+                              </span>
+                              <span>•</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-extrabold ${
+                                  isFemaleOnly
+                                    ? 'bg-pink-100/90 text-pink-900'
+                                    : 'bg-sky-100/90 text-sky-950'
+                                }`}
+                              >
+                                {badgeLabel}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-black">
+                                {p.tag}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-0.5">
+                              {p.normalPrice && (
+                                <span className="text-xs line-through text-stone-400">
+                                  {formatRupiah(p.normalPrice)}
+                                </span>
+                              )}
+                              <span className="font-black text-sm sm:text-base text-emerald-900">
+                                {formatRupiah(p.price)}
+                              </span>
+                              <span className="text-xs font-extrabold text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-md">
+                                +{p.points} Poin
+                              </span>
+                            </div>
+                          </div>
+
+                          <div
+                            className={`px-3.5 py-2.5 rounded-xl border-2 font-black text-xs sm:text-sm flex items-center gap-1.5 flex-shrink-0 transition ${
+                              isSelected
+                                ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37] shadow-xs'
+                                : 'bg-stone-50 border-stone-300 text-[#0B261C]'
+                            }`}
+                          >
+                            <i
+                              className={`fa-solid ${
+                                isSelected ? 'fa-circle-check text-[#D4AF37]' : 'fa-plus text-stone-500'
+                              }`}
+                            ></i>
+                            <span>{isSelected ? 'Terpilih' : 'Pilih'}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Pemilih Anatomi Titik Cedera (otomatis tertutup total begitu titik dipilih) */}
+                {serviceMode === 'single' &&
+                  (chosenSingleIds.includes('s2') || chosenSingleIds.includes('s4')) &&
+                  isInjuryPickerOpen && (
+                    <div className="p-3.5 border-2 border-amber-400 bg-amber-50 rounded-2xl space-y-2.5 animate-page-enter">
+                      <div className="flex justify-between items-center gap-2">
+                        <p className="text-sm font-black text-[#0B261C] flex items-center gap-1.5">
+                          <i className="fa-solid fa-person-running text-amber-600"></i>
+                          <span>
+                            {isEn
+                              ? 'Select Injury / Nerve Area:'
+                              : 'Pilih Titik Keluhan Cedera / Saraf:'}
+                          </span>
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIsInjuryPickerOpen(false)}
+                          className="text-xs font-black text-stone-500 hover:text-stone-800 px-2 py-0.5 rounded-lg"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {ANATOMY_LOCATIONS.map((loc) => {
+                          const isLocActive = chosenInjurySpot === loc;
+                          return (
+                            <button
+                              key={loc}
+                              type="button"
+                              onClick={() => {
+                                setChosenInjurySpot(loc);
+                                setIsInjuryPickerOpen(false);
+                              }}
+                              className={`tactile-btn text-xs font-extrabold px-3 py-2 rounded-xl border transition ${
+                                isLocActive
+                                  ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C] shadow-xs'
+                                  : 'bg-white text-stone-800 border-stone-300 hover:bg-stone-50'
+                              }`}
+                            >
+                              {loc}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                {/* Footer Ringkasan Langkah 1 & Tombol Lanjut Pilih Jadwal */}
+                <div className="pt-3 border-t border-stone-200 space-y-2.5">
+                  {((serviceMode === 'single' && chosenSingleIds.length > 0) ||
+                    (serviceMode === 'package' && Boolean(chosenPackageId))) && (
+                    <div className="bg-[#0B261C] text-white p-3.5 rounded-2xl flex justify-between items-center border border-[#D4AF37]/50 shadow-sm">
+                      <div className="min-w-0 flex-1 pr-2">
+                        <span className="text-xs text-emerald-300 font-bold block">
+                          Layanan Dipilih (
+                          {serviceMode === 'single'
+                            ? `${chosenSingleIds.length} Layanan`
+                            : '1 Paket'}
+                          ):
+                        </span>
+                        <p className="text-sm font-extrabold text-white truncate mt-0.5">
+                          {pricing.titleStr}
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className="text-base font-black text-[#D4AF37] block">
+                          {formatRupiah(pricing.subtotal)}
+                        </span>
+                        <span className="text-xs font-extrabold text-emerald-300">
+                          +{pricing.pts} Poin
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleGoToStep2}
+                    disabled={
+                      (serviceMode === 'single' && chosenSingleIds.length === 0) ||
+                      (serviceMode === 'package' && !chosenPackageId)
+                    }
+                    className={`tactile-btn w-full min-h-[50px] font-black py-3.5 px-5 rounded-2xl shadow-md border text-sm uppercase tracking-wider flex items-center justify-center gap-2 transition ${
+                      (serviceMode === 'single' && chosenSingleIds.length === 0) ||
+                      (serviceMode === 'package' && !chosenPackageId)
+                        ? 'bg-stone-200 text-stone-500 border-stone-300 cursor-not-allowed'
+                        : 'gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] border-amber-200'
+                    }`}
+                  >
+                    <span>
+                      {(serviceMode === 'single' && chosenSingleIds.length === 0) ||
+                      (serviceMode === 'package' && !chosenPackageId)
+                        ? 'Pilih Layanan Terlebih Dahulu'
+                        : 'Lanjut ke Pilih Jadwal'}
+                    </span>
+                    <i className="fa-solid fa-arrow-right"></i>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -1058,32 +1239,32 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           {/* WIZARD LANGKAH 2: PILIH TANGGAL (30 HARI) & JAM OPERASIONAL     */}
           {/* =============================================================== */}
           {bookingStep === 2 && (
-            <div className="space-y-4 animate-page-enter">
+            <div className="space-y-3 animate-page-enter">
               {/* Info Singkat Layanan Terpilih di Atas Langkah 2 */}
-              <div className="bg-[#0B261C] text-white p-4 rounded-2xl border border-[#D4AF37]/50 shadow-sm flex justify-between items-center gap-3">
+              <div className="bg-[#0B261C] text-white p-3.5 rounded-2xl border border-[#D4AF37]/50 shadow-sm flex justify-between items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <span className="text-[10px] font-black uppercase text-[#D4AF37] block">
-                    Layanan Terpilih • +{pricing.pts} Poin
+                  <span className="text-xs font-black text-[#D4AF37] block">
+                    Layanan Terpilih • {formatRupiah(pricing.subtotal)}
                   </span>
-                  <p className="text-xs font-extrabold text-white truncate mt-0.5">
+                  <p className="text-sm font-extrabold text-white truncate mt-0.5">
                     {pricing.titleStr}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => goToStep(1)}
-                  className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-300 border border-[#D4AF37]/40 text-[11px] font-black px-3 py-2 rounded-xl flex-shrink-0"
+                  className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-300 border border-[#D4AF37]/40 text-xs font-black px-3 py-2 rounded-xl flex-shrink-0"
                 >
-                  Ubah Layanan
+                  Ubah
                 </button>
               </div>
 
-              {/* Opsi Lokasi Terapi: Kunjungan Studio vs Home Service (+Biaya Perjalanan) */}
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-stone-200/90 space-y-2.5">
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                  Pilih Lokasi Sesi Terapi
-                </span>
-                <div className="grid grid-cols-2 gap-2.5 text-xs font-black">
+              {/* Opsi Lokasi Terapi: Studio vs Home Service */}
+              <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-200/90 space-y-2">
+                <h3 className="text-sm font-black text-[#0B261C]">
+                  Pilih Lokasi Terapi
+                </h3>
+                <div className="grid grid-cols-2 gap-2.5 text-sm font-black">
                   <button
                     type="button"
                     onClick={() => setVisitType('studio')}
@@ -1094,13 +1275,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span>🏠 Datang ke Studio</span>
+                      <span>🏠 Di Studio</span>
                       {visitType === 'studio' && (
                         <i className="fa-solid fa-circle-check text-emerald-700"></i>
                       )}
                     </div>
-                    <span className="text-[10px] font-medium text-stone-500 block mt-1 leading-snug">
-                      Graha Cipta 5 Blok E7 No.3
+                    <span className="text-xs font-semibold text-stone-500 block mt-0.5 leading-snug">
+                      Graha Cipta 5 E7/3
                     </span>
                   </button>
 
@@ -1119,7 +1300,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         <i className="fa-solid fa-circle-check text-amber-600"></i>
                       )}
                     </div>
-                    <span className="text-[10px] font-medium text-amber-800 block mt-1 leading-snug">
+                    <span className="text-xs font-semibold text-amber-800 block mt-0.5 leading-snug">
                       + Biaya Perjalanan
                     </span>
                   </button>
@@ -1127,17 +1308,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               </div>
 
               {/* BAGIAN A: KALENDER HORIZONTAL 30 HARI */}
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-stone-200/90 space-y-3">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                      {isEn ? 'Step 2A • 30-Day Calendar' : 'Langkah 2A • Kalender 30 Hari'}
-                    </span>
-                    <h2 className="text-sm font-black text-[#0B261C] mt-0.5">
-                      {isEn ? 'Select Arrival Date' : 'Pilih Tanggal Kedatangan'}
-                    </h2>
-                  </div>
-                  <span className="text-[11px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-xl">
+              <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-200/90 space-y-2.5">
+                <div className="flex justify-between items-center gap-2">
+                  <h2 className="text-base font-black text-[#0B261C]">
+                    {isEn ? 'Select Date' : 'Pilih Tanggal'}
+                  </h2>
+                  <span className="text-xs font-black text-amber-950 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-xl">
                     {selectedDatePretty}
                   </span>
                 </div>
@@ -1146,7 +1322,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   {calendarDays.map((item) => {
                     const isSelected = item.iso === selectedDateIso;
 
-                    // Tanggal yang sudah terlewat (misal tanggal 19 dan sebelumnya saat hari ini tanggal 20) -> ABU-ABU & TERKUNCI
                     if (item.isPast) {
                       return (
                         <button
@@ -1154,15 +1329,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           type="button"
                           disabled
                           aria-label={`Tanggal ${item.pretty} Sudah Terlewat`}
-                          className="flex-shrink-0 w-14 py-2 rounded-2xl border border-stone-300 bg-stone-200 text-stone-400 flex flex-col items-center justify-center cursor-not-allowed opacity-85"
+                          className="flex-shrink-0 w-15 py-2 rounded-2xl border border-stone-300 bg-stone-200 text-stone-400 flex flex-col items-center justify-center cursor-not-allowed opacity-85"
                         >
-                          <span className="text-[9px] font-black uppercase text-stone-400">
+                          <span className="text-xs font-extrabold uppercase text-stone-400">
                             {item.dayName}
                           </span>
-                          <span className="text-sm font-black leading-tight my-0.5 line-through text-stone-400">
+                          <span className="text-base font-black leading-tight my-0.5 line-through text-stone-400">
                             {item.dayNum}
                           </span>
-                          <span className="text-[8px] font-black bg-stone-300 text-stone-600 px-1.5 rounded uppercase">
+                          <span className="text-[10px] font-black bg-stone-300 text-stone-600 px-1.5 rounded uppercase">
                             {isEn ? 'PAST' : 'LEWAT'}
                           </span>
                         </button>
@@ -1175,13 +1350,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           key={item.iso}
                           type="button"
                           onClick={() => handleDateSelect(item.iso, item.pretty, true, false)}
-                          className="flex-shrink-0 w-14 py-2 rounded-2xl border border-red-200 bg-red-50/80 text-red-400 flex flex-col items-center justify-center cursor-not-allowed"
+                          className="flex-shrink-0 w-15 py-2 rounded-2xl border border-red-200 bg-red-50/80 text-red-400 flex flex-col items-center justify-center cursor-not-allowed"
                         >
-                          <span className="text-[9px] font-black uppercase">{item.dayName}</span>
-                          <span className="text-sm font-black leading-tight my-0.5 line-through">
+                          <span className="text-xs font-extrabold uppercase">{item.dayName}</span>
+                          <span className="text-base font-black leading-tight my-0.5 line-through">
                             {item.dayNum}
                           </span>
-                          <span className="text-[8px] font-black bg-red-200 text-red-800 px-1.5 rounded">
+                          <span className="text-[10px] font-black bg-red-200 text-red-800 px-1.5 rounded">
                             LIBUR
                           </span>
                         </button>
@@ -1193,25 +1368,25 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         key={item.iso}
                         type="button"
                         onClick={() => handleDateSelect(item.iso, item.pretty, false, false)}
-                        className={`tactile-btn flex-shrink-0 w-14 py-2 rounded-2xl border-2 transition flex flex-col items-center justify-center ${
+                        className={`tactile-btn flex-shrink-0 w-15 py-2 rounded-2xl border-2 transition flex flex-col items-center justify-center ${
                           isSelected
                             ? 'bg-[#0B261C] text-white border-[#D4AF37] shadow-sm'
                             : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-emerald-600/40'
                         }`}
                       >
                         <span
-                          className={`text-[9px] font-black uppercase ${
-                            isSelected ? 'text-[#D4AF37]' : 'text-stone-400'
+                          className={`text-xs font-extrabold uppercase ${
+                            isSelected ? 'text-[#D4AF37]' : 'text-stone-500'
                           }`}
                         >
                           {item.dayName}
                         </span>
-                        <span className="text-sm font-black leading-tight my-0.5">
+                        <span className="text-base font-black leading-tight my-0.5">
                           {item.dayNum}
                         </span>
                         {item.isToday ? (
                           <span
-                            className={`text-[8px] font-black px-1.5 rounded uppercase ${
+                            className={`text-[10px] font-black px-1.5 rounded uppercase ${
                               isSelected
                                 ? 'bg-[#D4AF37] text-[#0B261C]'
                                 : 'bg-emerald-100 text-emerald-900'
@@ -1221,7 +1396,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           </span>
                         ) : (
                           <span
-                            className={`text-[9px] font-semibold ${
+                            className={`text-xs font-semibold ${
                               isSelected ? 'text-emerald-200' : 'text-stone-500'
                             }`}
                           >
@@ -1234,37 +1409,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 </div>
               </div>
 
-              {/* BAGIAN B: GRID SLOT JAM OPERASIONAL (SISTEM JAM ABU-ABU TERKUNCI) */}
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-stone-200/90 space-y-3.5">
+              {/* BAGIAN B: GRID SLOT JAM OPERASIONAL */}
+              <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-200/90 space-y-3">
                 <div className="flex justify-between items-center gap-2 flex-wrap">
-                  <div>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                      {isEn ? 'Step 2B • Operating Hours' : 'Langkah 2B • Jam Operasional'}
-                    </span>
-                    <h2 className="text-sm font-black text-[#0B261C] mt-0.5">
-                      {isEn ? 'Select Session Time' : 'Pilih Jam Sesi Terapi'}
-                    </h2>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-stone-500 flex-wrap">
-                    <span className="bg-emerald-50 text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded-lg font-black">
-                      🕒 {currentTimeHm} WIB
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-white border border-emerald-700 inline-block"></span>{' '}
-                      {isEn ? 'Open' : 'Tersedia'}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-stone-300 inline-block"></span>{' '}
-                      {isEn ? 'Passed/Locked' : 'Lewat/Penuh'}
-                    </span>
-                  </div>
+                  <h2 className="text-base font-black text-[#0B261C]">
+                    {isEn ? 'Select Session Time' : 'Pilih Jam Sesi'}
+                  </h2>
+                  <span className="bg-emerald-50 text-emerald-950 border border-emerald-200 px-2.5 py-1 rounded-xl text-xs font-black">
+                    🕒 Sekarang {currentTimeHm} WIB
+                  </span>
                 </div>
-
-                <p className="text-[11px] text-amber-950 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl font-medium leading-relaxed">
-                  ⚡ <b>Aturan Ketertiban Jadwal:</b> Tanggal dan jam yang{' '}
-                  <b>sudah terlewat</b> maupun yang <b>sudah dibooking</b> otomatis berwarna{' '}
-                  <b>abu-abu (Terkunci)</b> dan tidak dapat dipilih.
-                </p>
 
                 <div className="grid grid-cols-3 gap-2.5">
                   {masterTimeSlots.map((slot) => {
@@ -1277,7 +1431,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     );
                     const isSelected = selectedTimeSlot === slot.time;
 
-                    // Jam yang sudah terlewat pada hari ini (misal jam 09:00 & 11:00 saat pukul 11:46) -> ABU-ABU & TERKUNCI
                     if (status.reason === 'past') {
                       return (
                         <button
@@ -1287,11 +1440,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           aria-label={`Jam ${slot.time} Sudah Terlewat`}
                           className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
                         >
-                          <span className="text-xs font-black line-through text-stone-400">
+                          <span className="text-sm sm:text-base font-black line-through text-stone-400">
                             {slot.time}
                           </span>
-                          <span className="text-[9px] font-black uppercase text-stone-500 mt-0.5">
-                            <i className="fa-regular fa-clock text-[8px] mr-0.5"></i>{' '}
+                          <span className="text-xs font-bold text-stone-500 mt-0.5">
                             {isEn ? 'Passed' : 'Terlewat'}
                           </span>
                         </button>
@@ -1306,9 +1458,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           aria-label={`Jam ${slot.time} Terkunci`}
                           className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
                         >
-                          <span className="text-xs font-black line-through">{slot.time}</span>
-                          <span className="text-[9px] font-black uppercase text-stone-500 mt-0.5">
-                            <i className="fa-solid fa-lock text-[8px] mr-0.5"></i>{' '}
+                          <span className="text-sm sm:text-base font-black line-through">
+                            {slot.time}
+                          </span>
+                          <span className="text-xs font-bold text-stone-500 mt-0.5">
                             {isEn ? 'Locked' : 'Penuh'}
                           </span>
                         </button>
@@ -1328,8 +1481,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           }
                           className="py-3 px-2 rounded-2xl striped-disabled text-stone-500 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center"
                         >
-                          <span className="text-xs font-bold">{slot.time}</span>
-                          <span className="text-[9px] font-black uppercase bg-stone-300 text-stone-700 px-1.5 rounded mt-0.5">
+                          <span className="text-sm sm:text-base font-bold">{slot.time}</span>
+                          <span className="text-xs font-bold bg-stone-300 text-stone-700 px-1.5 rounded mt-0.5">
                             {isEn ? 'Closed' : 'Tutup'}
                           </span>
                         </button>
@@ -1347,9 +1500,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             : 'bg-white text-[#0B261C] border-emerald-700/40 hover:border-emerald-800'
                         }`}
                       >
-                        <span className="text-xs font-black">{slot.time}</span>
+                        <span className="text-sm sm:text-base font-black">{slot.time}</span>
                         <span
-                          className={`text-[10px] font-extrabold mt-0.5 ${
+                          className={`text-xs font-extrabold mt-0.5 ${
                             isSelected ? 'text-[#D4AF37]' : 'text-emerald-700'
                           }`}
                         >
@@ -1366,12 +1519,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   })}
                 </div>
 
-                {/* Tombol Navigasi Bawah Langkah 2: Kembali & Lanjut ke Pembayaran (Luxury Gold) */}
+                {/* Tombol Navigasi Bawah Langkah 2 */}
                 <div className="pt-3 border-t border-stone-200 flex gap-2.5">
                   <button
                     type="button"
                     onClick={() => goToStep(1)}
-                    className="tactile-btn min-h-[48px] bg-stone-100 hover:bg-stone-200 text-stone-700 font-black py-3.5 px-4 rounded-2xl text-xs border border-stone-300 flex items-center justify-center gap-1.5"
+                    className="tactile-btn min-h-[50px] bg-stone-100 hover:bg-stone-200 text-stone-800 font-black py-3.5 px-4 rounded-2xl text-sm border border-stone-300 flex items-center justify-center gap-1.5"
                   >
                     <i className="fa-solid fa-arrow-left"></i>
                     <span>Kembali</span>
@@ -1380,7 +1533,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   <button
                     type="button"
                     onClick={handleGoToStep3}
-                    className="tactile-btn gold-shimmer-card flex-1 min-h-[48px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3.5 px-5 rounded-2xl shadow-md border border-amber-200 text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+                    className="tactile-btn gold-shimmer-card flex-1 min-h-[50px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3.5 px-5 rounded-2xl shadow-md border border-amber-200 text-sm uppercase tracking-wider flex items-center justify-center gap-2"
                   >
                     <span>Lanjut ke Pembayaran</span>
                     <i className="fa-solid fa-arrow-right"></i>
@@ -1488,8 +1641,40 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
               {/* 2. Pilihan Metode Pembayaran Dinamis (QRIS / Transfer Bank / Cash) */}
               <div className="bg-white p-4 rounded-2xl shadow-md border-2 border-[#D4AF37] space-y-4">
-                {/* Banner Countdown Timer 20 Menit: HANYA MUNCUL JIKA PILIH QRIS ATAU TRANSFER BANK */}
-                {(step3MethodType === 'qris' || step3MethodType === 'bank_transfer') && (
+                {/* Informasi Tersimpan Otomatis di Bar Riwayat */}
+                <div className="bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-xl flex items-center justify-between gap-2 text-[11px] text-emerald-950">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <i className="fa-solid fa-floppy-disk text-emerald-700 flex-shrink-0"></i>
+                    <span className="font-bold leading-snug">
+                      Booking ini otomatis tersimpan di <b>Bar Riwayat (Pending 20 Menit)</b>. Jika aplikasi ke-close atau ke-refresh, Anda tetap bisa lanjut bayar dari menu <b>Riwayat</b>.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCustomerTab('history')}
+                    className="tactile-btn bg-[#0B261C] text-[#D4AF37] text-[10px] font-black px-2.5 py-1.5 rounded-lg flex-shrink-0"
+                  >
+                    Buka Riwayat
+                  </button>
+                </div>
+
+                {/* Banner Countdown Timer 20 Menit atau Status Gagal jika Waktu Habis */}
+                {step3RemainingMs <= 0 ? (
+                  <div className="bg-red-50 border-2 border-red-400 text-red-900 px-3.5 py-3 rounded-2xl space-y-1.5 animate-fade">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black uppercase flex items-center gap-1.5 text-red-800">
+                        <i className="fa-solid fa-ban"></i>
+                        <span>Waktu Pembayaran 20 Menit Berakhir (GAGAL)</span>
+                      </span>
+                      <span className="bg-red-700 text-white font-mono font-black text-xs px-2.5 py-0.5 rounded-lg">
+                        00:00
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-medium leading-relaxed text-red-800">
+                      Batas waktu pembayaran 20 menit telah habis sehingga Anda tidak dapat melakukan pembayaran lagi pada pesanan ini. Silakan kembali ke Langkah 2 untuk membuat jadwal baru.
+                    </p>
+                  </div>
+                ) : (
                   <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-[#0B261C] px-3.5 py-2.5 rounded-2xl flex justify-between items-center shadow-xs animate-fade">
                     <div className="flex items-center gap-2.5">
                       <i className="fa-solid fa-stopwatch text-base animate-bounce"></i>
@@ -1498,7 +1683,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           Countdown Timer Pembayaran (20 Menit)
                         </span>
                         <span className="text-[11px] font-bold mt-0.5 block">
-                          Selesaikan pembayaran & upload bukti untuk mengunci jam {selectedTimeSlot} WIB
+                          Selesaikan pembayaran sebelum waktu habis untuk kunci jam {selectedTimeSlot} WIB
                         </span>
                       </div>
                     </div>
@@ -1546,9 +1731,26 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         <button
                           key={m.id}
                           type="button"
+                          disabled={step3RemainingMs <= 0}
                           onClick={() => {
+                            if (step3RemainingMs <= 0) return;
                             setStep3MethodType(m.id);
                             setStep3ProofError('');
+                            if (onConfirmWizardBooking && selectedTimeSlot && step3PendingOrderId) {
+                              onConfirmWizardBooking({
+                                total: pricing.finalPrice,
+                                scheduleDatePretty: selectedDatePretty,
+                                scheduleDateIso: selectedDateIso,
+                                selectedTimeSlot,
+                                itemsSummary: finalItemsSummary,
+                                pointsEarned: pricing.pts,
+                                pointsRedeemedCost: pricing.rewardObj.cost,
+                                payMethodType: m.id,
+                                markAsPaid: false,
+                                existingOrderId: step3PendingOrderId,
+                                silentReceipt: true,
+                              });
+                            }
                           }}
                           className={`tactile-btn py-2.5 px-2 rounded-2xl border-2 transition flex flex-col items-center justify-center gap-0.5 text-center ${
                             isActive
@@ -1875,25 +2077,38 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     type="button"
                     onClick={() => handleConfirmStep3Payment()}
                     disabled={
-                      (step3MethodType === 'qris' || step3MethodType === 'bank_transfer') &&
-                      !step3ProofImage
+                      step3RemainingMs <= 0 ||
+                      ((step3MethodType === 'qris' || step3MethodType === 'bank_transfer') &&
+                        !step3ProofImage)
                     }
                     className={`tactile-btn w-full min-h-[52px] font-black py-3.5 px-4 rounded-2xl shadow-md border text-xs sm:text-sm uppercase tracking-wide flex items-center justify-center gap-2 text-center leading-snug transition ${
-                      (step3MethodType === 'qris' || step3MethodType === 'bank_transfer') &&
-                      !step3ProofImage
+                      step3RemainingMs <= 0
+                        ? 'bg-red-100 text-red-700 border-red-300 cursor-not-allowed'
+                        : (step3MethodType === 'qris' || step3MethodType === 'bank_transfer') &&
+                          !step3ProofImage
                         ? 'bg-stone-200 text-stone-500 border-stone-300 cursor-not-allowed'
                         : 'gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] border-amber-200'
                     }`}
                   >
-                    <i className="fa-solid fa-lock text-sm flex-shrink-0"></i>
+                    <i
+                      className={`fa-solid ${
+                        step3RemainingMs <= 0 ? 'fa-ban' : 'fa-lock'
+                      } text-sm flex-shrink-0`}
+                    ></i>
                     <span>
-                      {step3MethodType === 'cash'
+                      {step3RemainingMs <= 0
+                        ? 'WAKTU 20 MENIT HABIS — PEMBAYARAN GAGAL'
+                        : step3MethodType === 'cash'
                         ? 'BOOKING & KUNCI JADWAL (BAYAR DI TEMPAT)'
                         : 'SAYA SUDAH BAYAR & KIRIM BUKTI (KUNCI JADWAL)'}
                     </span>
                   </button>
                   <p className="text-[11px] text-stone-500 text-center mt-2 leading-relaxed">
-                    {step3MethodType === 'cash' ? (
+                    {step3RemainingMs <= 0 ? (
+                      <span className="text-red-700 font-bold">
+                        Waktu pembayaran 20 menit telah berakhir. Anda tidak dapat melakukan pembayaran lagi pada pesanan ini.
+                      </span>
+                    ) : step3MethodType === 'cash' ? (
                       <>
                         Klik tombol di atas untuk mengunci slot jam secara permanen dan menerbitkan
                         Struk Digital. Pembayaran dilakukan di kasir saat kedatangan.
@@ -1902,7 +2117,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       <>
                         Unggah bukti transfer/QRIS lalu klik tombol di atas untuk langsung mengunci
                         slot jam <b>{selectedTimeSlot} WIB</b> secara permanen (status:{' '}
-                        <b>Menunggu Verifikasi Admin</b>) dan membuka <b>Struk Digital</b>.
+                        <b>Berhasil / Menunggu Verifikasi Admin</b>) dan membuka <b>Struk Digital</b>.
                       </>
                     )}
                   </p>
@@ -1925,8 +2140,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 : 'Jadwal Saya & Riwayat Booking'}
             </h2>
             <p className="text-xs text-stone-500 leading-relaxed">
-              Kelola jadwal kedatangan, lihat <b>Struk Digital</b>, atau ajukan{' '}
-              <b>Pembatalan / Refund</b> (maksimal <b>1 jam sebelum jadwal SPA dimulai</b>).
+              Lanjutkan pembayaran yang masih <b>Pending (batas 20 menit)</b>, lihat{' '}
+              <b>Struk Digital</b>, atau ajukan <b>Pembatalan / Refund</b> (maksimal{' '}
+              <b>1 jam sebelum jadwal SPA dimulai</b>).
             </p>
           </div>
 
@@ -1955,15 +2171,21 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   b.paymentStatus === 'Terkonfirmasi (ACC Admin)' || b.status === 'Verified';
                 const isWaitingAdminVerify = b.paymentStatus === 'Menunggu Verifikasi Admin';
                 const isCashBooking = b.paymentStatus === 'Booking Cash (Bayar di Lokasi)';
-                const isFailed = b.paymentStatus === 'Gagal';
                 const isRefundWaiting =
                   b.paymentStatus === 'Menunggu Cek Refund Admin' ||
                   b.status === 'Refund_Requested';
                 const isRefundDone =
                   b.paymentStatus === 'Refund Selesai / Dibatalkan' ||
                   b.status === 'Refund_Completed' ||
-                  b.status === 'Cancelled';
+                  Boolean(b.refundRequest && b.status === 'Cancelled');
                 const remMs = Math.max(0, b.expiresAt - nowMs);
+                const isFailed =
+                  !isPaid &&
+                  !isRefundWaiting &&
+                  !isRefundDone &&
+                  (b.paymentStatus === 'Gagal' ||
+                    b.paymentStatus === 'Kedaluwarsa' ||
+                    remMs <= 0);
                 const isDone = b.status === 'Completed';
 
                 // Pesanan aktif yang dapat mengajukan pembatalan/refund
@@ -1983,6 +2205,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         ? 'border-2 border-amber-400 bg-amber-50/20'
                         : isRefundDone
                         ? 'border-stone-200 bg-stone-50/70 opacity-90'
+                        : isFailed
+                        ? 'border-2 border-red-300 bg-red-50/20'
                         : isPaid
                         ? 'border-stone-200/90'
                         : 'border-2 border-amber-400'
@@ -2007,15 +2231,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             </span>
                           ) : isConfirmedAcc ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
-                              ✓ TERKONFIRMASI (ACC ADMIN) • Jam Terkunci
+                              ✓ BERHASIL • TERKONFIRMASI (ACC ADMIN)
                             </span>
                           ) : isWaitingAdminVerify ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-400">
-                              🔍 MENUNGGU VERIFIKASI ADMIN • Jam Terkunci
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
+                              ✓ PEMBAYARAN BERHASIL • Menunggu Verifikasi Admin
                             </span>
                           ) : isCashBooking ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-400">
-                              💵 BOOKING CASH (BAYAR DI LOKASI) • Jam Terkunci
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
+                              ✓ BOOKING BERHASIL • Cash (Bayar di Lokasi)
                             </span>
                           ) : isPaid ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
@@ -2023,11 +2247,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             </span>
                           ) : isFailed ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300">
-                              ✕ STATUS: GAGAL ({formatCountdown(remMs)})
+                              ✕ STATUS: GAGAL (Waktu 20 Menit Habis)
                             </span>
                           ) : (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-400">
-                              ⏳ STATUS: PENDING ({formatCountdown(remMs)})
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-400 animate-pulse">
+                              ⏳ STATUS: PENDING (Sisa Waktu {formatCountdown(remMs)})
                             </span>
                           )}
 
@@ -2054,6 +2278,33 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         {formatRupiah(b.total)}
                       </span>
                     </div>
+
+                    {/* Keterangan jika waktu 20 menit sudah berakhir (GAGAL) */}
+                    {isFailed && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 text-[11px] text-red-800 flex items-start gap-2">
+                        <i className="fa-solid fa-ban text-red-600 mt-0.5 flex-shrink-0"></i>
+                        <span>
+                          <b>Batas waktu pembayaran 20 menit telah berakhir (GAGAL).</b> Anda tidak
+                          dapat melakukan pembayaran lagi pada pesanan ini. Silakan buat booking
+                          baru di menu Booking.
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Keterangan jika masih Pending (< 20 Menit) */}
+                    {!isPaid && !isFailed && !isRefundWaiting && !isRefundDone && (
+                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-[11px] text-amber-950 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <i className="fa-solid fa-stopwatch text-amber-700 animate-bounce"></i>
+                          <span>
+                            Selesaikan pembayaran sebelum <b>{formatCountdown(remMs)}</b> berakhir agar pesanan tidak gagal.
+                          </span>
+                        </div>
+                        <span className="font-mono font-black text-xs bg-[#0B261C] text-[#D4AF37] px-2.5 py-1 rounded-lg flex-shrink-0">
+                          {formatCountdown(remMs)}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Keterangan jika sebelumnya pengajuan refund pernah ditolak Admin */}
                     {b.refundRejectedReason && isActiveBooking && (
@@ -2144,7 +2395,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </div>
                     )}
 
-                    {/* Baris Tombol Utama: Kirim Bukti Booking ke WA Admin, Lihat Struk & Batalkan / Ajukan Refund */}
+                    {/* Baris Tombol Utama: Kirim Bukti Booking ke WA Admin, Lihat Struk / Bayar Pending & Batalkan / Ajukan Refund */}
                     <div className="space-y-2 pt-2 border-t border-stone-100">
                       {isPaid && !isRefundWaiting && !isRefundDone && (
                         <a
@@ -2159,22 +2410,33 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       )}
 
                       <div className="flex flex-col sm:flex-row gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onViewReceipt(b)}
-                          className={`tactile-btn flex-1 min-h-[44px] font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xs ${
-                            isPaid || isRefundWaiting || isRefundDone
-                              ? 'bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37]'
-                              : 'gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] border border-amber-300'
-                          }`}
-                        >
-                          <i className={`fa-solid ${isPaid ? 'fa-receipt' : 'fa-qrcode'}`}></i>
-                          <span>
-                            {isPaid || isRefundWaiting || isRefundDone
-                              ? 'Lihat Struk Digital Resmi'
-                              : `Lihat Struk Pending & Bayar (${formatCountdown(remMs)})`}
-                          </span>
-                        </button>
+                        {isFailed ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="flex-1 min-h-[44px] bg-stone-200 text-stone-500 border border-stone-300 font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 cursor-not-allowed opacity-85"
+                          >
+                            <i className="fa-solid fa-lock"></i>
+                            <span>Waktu 20 Menit Habis — Tidak Bisa Bayar Lagi</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onViewReceipt(b)}
+                            className={`tactile-btn flex-1 min-h-[44px] font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xs ${
+                              isPaid || isRefundWaiting || isRefundDone
+                                ? 'bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37]'
+                                : 'gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] border border-amber-300'
+                            }`}
+                          >
+                            <i className={`fa-solid ${isPaid ? 'fa-receipt' : 'fa-qrcode'}`}></i>
+                            <span>
+                              {isPaid || isRefundWaiting || isRefundDone
+                                ? 'Lihat Struk Digital Resmi'
+                                : `Lanjutkan Pembayaran (${formatCountdown(remMs)})`}
+                            </span>
+                          </button>
+                        )}
 
                         {/* Tombol Batalkan Booking / Ajukan Refund pada Setiap Pesanan Aktif */}
                         {isActiveBooking && (
@@ -2794,38 +3056,40 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       )}
 
       {/* ================================================================= */}
-      {/* BOTTOM NAVIGATION BAR KHUSUS PELANGGAN (SELALU TAMPIL DI AWAL)    */}
+      {/* BOTTOM NAVIGATION BAR KHUSUS PELANGGAN (RAPI & TIDAK MAKAN TEMPAT)*/}
       {/* ================================================================= */}
       <nav
         aria-label="Navigasi Pelanggan"
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-[#0B261C] text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-5 py-1.5 px-2 text-[10px] font-bold z-40 shadow-2xl"
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-[#0B261C] text-stone-300 border-t border-[#D4AF37]/50 grid grid-cols-5 py-1.5 px-1 text-[10px] font-bold z-40 shadow-2xl"
       >
         <button
           type="button"
           onClick={() => setCustomerTab('booking')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1 px-0.5 rounded-xl transition min-w-0 ${
             customerTab === 'booking'
-              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
-              : 'text-stone-400 hover:text-stone-200'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-extrabold'
+              : 'text-stone-300 hover:text-white'
           }`}
         >
           <i className="fa-solid fa-calendar-plus text-sm"></i>
-          <span>Booking</span>
+          <span className="text-[10px] leading-tight truncate max-w-full">Booking</span>
         </button>
 
         <button
           type="button"
           onClick={() => setCustomerTab('history')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 relative py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 relative py-1 px-0.5 rounded-xl transition min-w-0 ${
             customerTab === 'history'
-              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
-              : 'text-stone-400 hover:text-stone-200'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-extrabold'
+              : 'text-stone-300 hover:text-white'
           }`}
         >
           <i className="fa-solid fa-receipt text-sm"></i>
-          <span>{isEn ? 'Receipts' : 'Riwayat'}</span>
+          <span className="text-[10px] leading-tight truncate max-w-full">
+            {isEn ? 'Receipts' : 'Riwayat'}
+          </span>
           {pendingUserBookings.length > 0 && (
-            <span className="absolute top-0.5 right-3 bg-amber-400 text-[#0B261C] text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+            <span className="absolute top-0.5 right-2 bg-amber-400 text-[#0B261C] text-[9px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center">
               {pendingUserBookings.length}
             </span>
           )}
@@ -2834,16 +3098,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         <button
           type="button"
           onClick={handleOpenNotifTab}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 relative py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 relative py-1 px-0.5 rounded-xl transition min-w-0 ${
             customerTab === 'notifications'
-              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
-              : 'text-stone-400 hover:text-stone-200'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-extrabold'
+              : 'text-stone-300 hover:text-white'
           }`}
         >
           <i className="fa-solid fa-bell text-sm"></i>
-          <span>{isEn ? 'Notif' : 'Notifikasi'}</span>
+          <span className="text-[10px] leading-tight truncate max-w-full">
+            {isEn ? 'Notif' : 'Notifikasi'}
+          </span>
           {unreadNotifCount > 0 && (
-            <span className="absolute top-0.5 right-3 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+            <span className="absolute top-0.5 right-2 bg-red-500 text-white text-[9px] font-black w-3.5 h-3.5 rounded-full flex items-center justify-center animate-pulse">
               {unreadNotifCount}
             </span>
           )}
@@ -2852,27 +3118,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         <button
           type="button"
           onClick={() => setCustomerTab('rewards')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1 px-0.5 rounded-xl transition min-w-0 ${
             customerTab === 'rewards'
-              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
-              : 'text-stone-400 hover:text-stone-200'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-extrabold'
+              : 'text-stone-300 hover:text-white'
           }`}
         >
           <i className="fa-solid fa-crown text-sm"></i>
-          <span>{isEn ? 'Points' : 'Poin'}</span>
+          <span className="text-[10px] leading-tight truncate max-w-full">
+            {isEn ? 'Points' : 'Poin'}
+          </span>
         </button>
 
         <button
           type="button"
           onClick={() => setCustomerTab('account')}
-          className={`tactile-btn flex flex-col items-center justify-center gap-1 py-1.5 rounded-xl transition ${
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1 px-0.5 rounded-xl transition min-w-0 ${
             customerTab === 'account'
-              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
-              : 'text-stone-400 hover:text-stone-200'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-extrabold'
+              : 'text-stone-300 hover:text-white'
           }`}
         >
           <i className="fa-solid fa-circle-user text-sm"></i>
-          <span>{isEn ? 'Account' : 'Akun'}</span>
+          <span className="text-[10px] leading-tight truncate max-w-full">
+            {isEn ? 'Account' : 'Akun'}
+          </span>
         </button>
       </nav>
     </div>
