@@ -651,7 +651,7 @@ export default function App() {
       ? 'Pending'
       : isCash
       ? 'Booking Cash (Bayar di Lokasi)'
-      : 'Menunggu Verifikasi Admin';
+      : 'Lunas';
 
     const newBooking: BookingOrder = {
       id: targetOrderId,
@@ -671,6 +671,11 @@ export default function App() {
       expiresAt: targetExpiresAt,
       status: draft.markAsPaid ? 'Paid' : 'Pending_Payment',
       createdAt: isUpdatingExistingPending ? existingOrder!.createdAt : nowFormatted(),
+      verifiedDateIso: !draft.markAsPaid
+        ? undefined
+        : isCash
+        ? existingOrder?.verifiedDateIso
+        : getTodayIso(),
       paymentProofImage: draft.paymentProofImage || existingOrder?.paymentProofImage,
     };
 
@@ -689,15 +694,15 @@ export default function App() {
         target: 'admin',
         type: 'payment_success',
         title: isCash
-          ? `💵 Booking Cash Masuk! — ${newBooking.customer} (${newBooking.time} WIB)`
-          : `💰 Bukti Bayar Masuk (Menunggu Verifikasi)! — ${newBooking.customer} (${newBooking.time} WIB)`,
+          ? `💵 Booking Baru (Cash) — ${newBooking.customer} (${newBooking.time} WIB)`
+          : `✅ Booking Baru (LUNAS) — ${newBooking.customer} (${newBooking.time} WIB)`,
         message: isCash
           ? `Pelanggan ${newBooking.customer} (${newBooking.wa}) melakukan Booking Cash (Bayar di Lokasi) sebesar ${formatRupiah(
               newBooking.total
-            )}. Slot jam ${newBooking.time} WIB otomatis terkunci. Silakan klik ACC / Verifikasi Pesanan.`
-          : `Pelanggan ${newBooking.customer} (${newBooking.wa}) telah mengirim bukti pembayaran ${formatRupiah(
+            )}. Slot jam ${newBooking.time} WIB otomatis terkunci.`
+          : `Pelanggan ${newBooking.customer} (${newBooking.wa}) telah menyelesaikan pembayaran ${formatRupiah(
               newBooking.total
-            )} via ${newBooking.payMethod}. Slot jam ${newBooking.time} WIB otomatis terkunci (abu-abu). Silakan cek bukti & klik ACC / Verifikasi Pesanan.`,
+            )} via ${newBooking.payMethod} (Status: LUNAS). Slot jam ${newBooking.time} WIB otomatis terkunci.`,
         createdAt: nowFormatted(),
         read: false,
         orderId: newBooking.id,
@@ -719,9 +724,9 @@ export default function App() {
             )} dengan metode Cash / Bayar di Tempat telah berhasil mengunci jadwal ${
               newBooking.datePretty
             } • Jam ${newBooking.time} WIB. Pembayaran dilakukan di kasir saat kedatangan.\n📍 Alamat Studio: ${GRIYA_AYU_ADDRESS}`
-          : `Bukti pembayaran Anda sebesar ${formatRupiah(newBooking.total)} melalui ${
+          : `Pembayaran Anda sebesar ${formatRupiah(newBooking.total)} melalui ${
               newBooking.payMethod
-            } telah terkirim (Status: Menunggu Verifikasi Admin). Jadwal ${
+            } telah diterima (Status: LUNAS). Jadwal ${
               newBooking.datePretty
             } • Jam ${newBooking.time} WIB kini resmi terkunci untuk Anda.\n📍 Alamat Studio: ${GRIYA_AYU_ADDRESS}`,
         createdAt: nowFormatted(),
@@ -856,7 +861,7 @@ export default function App() {
 
     const resolvedStatus: BookingOrder['paymentStatus'] = isCash
       ? 'Booking Cash (Bayar di Lokasi)'
-      : 'Menunggu Verifikasi Admin';
+      : 'Lunas';
 
     const updatedOrder: BookingOrder = {
       ...targetOrder,
@@ -865,6 +870,7 @@ export default function App() {
       vaNumber: details.vaNumber,
       paymentStatus: resolvedStatus,
       status: 'Paid',
+      verifiedDateIso: isCash ? targetOrder.verifiedDateIso : getTodayIso(),
       paymentProofImage: paymentProofImage || targetOrder.paymentProofImage,
     };
 
@@ -877,15 +883,15 @@ export default function App() {
       target: 'admin',
       type: 'payment_success',
       title: isCash
-        ? `💵 Booking Cash Masuk! — ${updatedOrder.customer} (${updatedOrder.time} WIB)`
-        : `💰 Bukti Bayar Masuk (Menunggu Verifikasi)! — ${updatedOrder.customer} (${updatedOrder.time} WIB)`,
+        ? `💵 Booking Baru (Cash) — ${updatedOrder.customer} (${updatedOrder.time} WIB)`
+        : `✅ Booking Baru (LUNAS) — ${updatedOrder.customer} (${updatedOrder.time} WIB)`,
       message: isCash
         ? `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) melakukan Booking Cash sebesar ${formatRupiah(
             updatedOrder.total
           )}. Slot jam ${updatedOrder.time} WIB otomatis terkunci (abu-abu).`
-        : `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) telah mengunggah bukti bayar ${formatRupiah(
+        : `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) telah membayar ${formatRupiah(
             updatedOrder.total
-          )} via ${updatedOrder.payMethod}. Slot jam ${updatedOrder.time} WIB otomatis terkunci (abu-abu).`,
+          )} via ${updatedOrder.payMethod} (Status: LUNAS). Slot jam ${updatedOrder.time} WIB otomatis terkunci (abu-abu).`,
       createdAt: nowFormatted(),
       read: false,
       orderId: updatedOrder.id,
@@ -904,9 +910,9 @@ export default function App() {
       title: `🔒 Jam ${updatedOrder.time} WIB Terkunci (${resolvedStatus})`,
       message: isCash
         ? `Jadwal ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB telah dikunci (Booking Cash - Bayar di Lokasi).\n📍 Alamat Griya Ayu: ${GRIYA_AYU_ADDRESS}`
-        : `Bukti pembayaran Anda sebesar ${formatRupiah(
+        : `Pembayaran Anda sebesar ${formatRupiah(
             updatedOrder.total
-          )} telah diterima (Status: Menunggu Verifikasi Admin). Jadwal ${
+          )} telah diterima (Status: LUNAS). Jadwal ${
             updatedOrder.datePretty
           } • Jam ${updatedOrder.time} WIB resmi terkunci.\n📍 Alamat Griya Ayu: ${GRIYA_AYU_ADDRESS}`,
       createdAt: nowFormatted(),
@@ -925,7 +931,7 @@ export default function App() {
     showToast('Berhasil Disalin', `${label} telah disalin ke papan klip.`);
   };
 
-  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi "Terkonfirmasi (ACC Admin)" & Amankan ke Buku Besar Omzet + Cloud
+  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi Lunas & Terkonfirmasi
   const handleVerifyPayment = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     const todayIso = getTodayIso();
@@ -935,8 +941,8 @@ export default function App() {
           ? {
               ...b,
               status: 'Verified',
-              paymentStatus: 'Terkonfirmasi (ACC Admin)',
-              verifiedDateIso: todayIso,
+              paymentStatus: 'Lunas',
+              verifiedDateIso: b.verifiedDateIso || todayIso,
             }
           : b
       )
@@ -948,8 +954,8 @@ export default function App() {
         target: 'customer',
         targetPhone: targetOrder.wa,
         type: 'admin_confirmed',
-        title: `✅ Terkonfirmasi (ACC Admin) — Jam ${targetOrder.time} WIB`,
-        message: `Halo Kak ${targetOrder.customer}, pesanan Anda di GRIYA AYU SPORT MASSAGE & SPA untuk tanggal ${targetOrder.datePretty} jam ${targetOrder.time} WIB sudah kami VERIFIKASI / ACC. Jadwal Anda sudah terkunci. Kami tunggu kedatangannya di Griya Ayu (${GRIYA_AYU_ADDRESS}) maksimal 10 menit sebelum jadwal ya. Terima kasih!`,
+        title: `✅ Pesanan Terkonfirmasi & Lunas — Jam ${targetOrder.time} WIB`,
+        message: `Halo Kak ${targetOrder.customer}, pesanan Anda di GRIYA AYU SPORT MASSAGE & SPA untuk tanggal ${targetOrder.datePretty} jam ${targetOrder.time} WIB sudah kami KONFIRMASI (Status: LUNAS). Jadwal Anda sudah terkunci. Kami tunggu kedatangannya di Griya Ayu (${GRIYA_AYU_ADDRESS}) maksimal 10 menit sebelum jadwal ya. Terima kasih!`,
         createdAt: nowFormatted(),
         read: false,
         orderId: targetOrder.id,
@@ -957,7 +963,7 @@ export default function App() {
       addNotificationsAndSync([confirmNotif]);
     }
 
-    triggerCelebration('Terkonfirmasi (ACC) ✓');
+    triggerCelebration('Pesanan Lunas & ACC ✓');
   };
 
   const handleCompleteTreatment = (orderId: number) => {
@@ -971,7 +977,7 @@ export default function App() {
           ? {
               ...b,
               status: 'Completed',
-              paymentStatus: 'Terkonfirmasi (ACC Admin)',
+              paymentStatus: 'Lunas',
               verifiedDateIso: b.verifiedDateIso || todayIso,
             }
           : b

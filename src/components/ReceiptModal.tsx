@@ -198,13 +198,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <span className="text-[9px] text-stone-400 font-semibold block">
                   STATUS PESANAN
                 </span>
-                {order.paymentStatus === 'Terkonfirmasi (ACC Admin)' ? (
-                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300 inline-flex items-center gap-1">
-                    <i className="fa-solid fa-circle-check text-[9px]"></i> Terkonfirmasi (ACC Admin)
-                  </span>
-                ) : order.paymentStatus === 'Menunggu Verifikasi Admin' ? (
-                  <span className="text-[10px] font-black text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-300 inline-flex items-center gap-1">
-                    <i className="fa-solid fa-hourglass-half text-[9px]"></i> Menunggu Verifikasi Admin
+                {order.paymentStatus === 'Lunas' ||
+                order.paymentStatus === 'Terkonfirmasi (ACC Admin)' ||
+                (!methodInfo.isCash && isLocked) ? (
+                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-400 inline-flex items-center gap-1">
+                    <i className="fa-solid fa-circle-check text-[9px]"></i> LUNAS
                   </span>
                 ) : order.paymentStatus === 'Booking Cash (Bayar di Lokasi)' ? (
                   <span className="text-[10px] font-black text-emerald-900 bg-amber-100 px-2 py-0.5 rounded border border-[#D4AF37] inline-flex items-center gap-1">

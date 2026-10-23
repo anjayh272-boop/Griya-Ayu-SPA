@@ -2220,8 +2220,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     ) : (
                       <>
                         Unggah bukti transfer/QRIS lalu klik tombol di atas untuk langsung mengunci
-                        slot jam <b>{selectedTimeSlot} WIB</b> secara permanen (status:{' '}
-                        <b>Berhasil / Menunggu Verifikasi Admin</b>) dan membuka <b>Struk Digital</b>.
+                        slot jam <b>{selectedTimeSlot} WIB</b> secara permanen (status otomatis{' '}
+                        <b>LUNAS</b>) dan membuka <b>Struk Digital</b>.
                       </>
                     )}
                   </p>
@@ -2335,19 +2335,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             </span>
                           ) : isConfirmedAcc ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
-                              ✓ BERHASIL • TERKONFIRMASI (ACC ADMIN)
-                            </span>
-                          ) : isWaitingAdminVerify ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
-                              ✓ PEMBAYARAN BERHASIL • Menunggu Verifikasi Admin
+                              ✓ LUNAS • TERKONFIRMASI ADMIN
                             </span>
                           ) : isCashBooking ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
-                              ✓ BOOKING BERHASIL • Cash (Bayar di Lokasi)
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-400">
+                              💵 BOOKING CASH • Bayar di Lokasi
                             </span>
-                          ) : isPaid ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-                              ✓ STATUS: BERHASIL (Jam Terkunci)
+                          ) : isWaitingAdminVerify || isPaid ? (
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
+                              ✓ STATUS: LUNAS (Jam Terkunci)
                             </span>
                           ) : isFailed ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300">

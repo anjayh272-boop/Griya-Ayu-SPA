@@ -135,6 +135,7 @@ export const GRIYA_AYU_MAPS_URL = 'https://maps.app.goo.gl/CZY9eDC922v1byZQA';
 
 export function isOrderLockedStatus(order: BookingOrder): boolean {
   return (
+    order.paymentStatus === 'Lunas' ||
     order.paymentStatus === 'Berhasil' ||
     order.paymentStatus === 'Menunggu Verifikasi Admin' ||
     order.paymentStatus === 'Booking Cash (Bayar di Lokasi)' ||
@@ -232,7 +233,14 @@ export function isVerifiedRevenueOrder(order: BookingOrder): boolean {
   ) {
     return false;
   }
+  const isCash =
+    order.payMethodType === 'cash' ||
+    order.paymentStatus === 'Booking Cash (Bayar di Lokasi)';
+  if (!isCash && order.paymentStatus === 'Menunggu Verifikasi Admin') {
+    return true;
+  }
   return (
+    order.paymentStatus === 'Lunas' ||
     order.paymentStatus === 'Terkonfirmasi (ACC Admin)' ||
     order.paymentStatus === 'Berhasil' ||
     order.status === 'Verified' ||
@@ -843,8 +851,34 @@ export function loadBookingsPersistently(fallback: BookingOrder[] = []): Booking
   const mainList = safeLoadJson<BookingOrder[] | null>(STORAGE_KEYS.BOOKINGS, null);
   const ledgerList = safeLoadJson<BookingOrder[] | null>(STORAGE_KEYS.OMZET_LEDGER, null);
 
-  const base: BookingOrder[] = Array.isArray(mainList) ? mainList : fallback;
-  const ledger: BookingOrder[] = Array.isArray(ledgerList) ? ledgerList : [];
+  const normalizeNonCashLunas = (b: BookingOrder): BookingOrder => {
+    if (!b) return b;
+    const isCash =
+      b.payMethodType === 'cash' ||
+      b.paymentStatus === 'Booking Cash (Bayar di Lokasi)' ||
+      (b.payMethod || '').toLowerCase().includes('cash');
+    if (
+      !isCash &&
+      (b.paymentStatus === 'Menunggu Verifikasi Admin' || b.paymentStatus === 'Berhasil') &&
+      b.status !== 'Cancelled' &&
+      b.status !== 'Refund_Requested' &&
+      b.status !== 'Refund_Completed'
+    ) {
+      return {
+        ...b,
+        paymentStatus: 'Lunas',
+        verifiedDateIso: b.verifiedDateIso || b.date || getTodayIso(),
+      };
+    }
+    return b;
+  };
+
+  const base: BookingOrder[] = (Array.isArray(mainList) ? mainList : fallback).map(
+    normalizeNonCashLunas
+  );
+  const ledger: BookingOrder[] = (Array.isArray(ledgerList) ? ledgerList : []).map(
+    normalizeNonCashLunas
+  );
 
   if (ledger.length === 0) {
     return base;

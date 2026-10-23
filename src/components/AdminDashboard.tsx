@@ -93,8 +93,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     'orders' | 'notifications' | 'schedule' | 'account'
   >('orders');
   const [orderFilter, setOrderFilter] = useState<
-    'all' | 'refund_pending' | 'active' | 'refund_done'
-  >('all');
+    'new_incoming' | 'all' | 'refund_pending' | 'active' | 'refund_done'
+  >('new_incoming');
   const [customDateInput, setCustomDateInput] = useState<string>(() => getTodayIso());
   const [newSlotTimeInput, setNewSlotTimeInput] = useState<string>('20:30');
   const [expandedConfirmOrderId, setExpandedConfirmOrderId] = useState<number | null>(null);
@@ -126,8 +126,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const todayWaitingVerifyCount = bookings.filter(
     (b) =>
       b.date === todayIso &&
-      (b.paymentStatus === 'Menunggu Verifikasi Admin' ||
-        b.paymentStatus === 'Booking Cash (Bayar di Lokasi)')
+      b.paymentStatus === 'Booking Cash (Bayar di Lokasi)' &&
+      b.status !== 'Cancelled' &&
+      b.status !== 'Refund_Requested' &&
+      b.status !== 'Refund_Completed'
   ).length;
 
   const monthlyVerifiedOrders = bookings.filter((b) =>
@@ -148,14 +150,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const adminNotifications = notifications.filter((n) => n.target === 'admin');
   const unreadAdminNotifs = adminNotifications.filter((n) => !n.read).length;
-  const paidUnverifiedCount = bookings.filter(
-    (b) =>
-      b.paymentStatus === 'Menunggu Verifikasi Admin' ||
-      b.paymentStatus === 'Booking Cash (Bayar di Lokasi)' ||
-      (b.paymentStatus === 'Berhasil' && b.status === 'Paid')
-  ).length;
+
+  const isOrderNewIncoming = (b: BookingOrder) => {
+    const isRefWait =
+      b.paymentStatus === 'Menunggu Cek Refund Admin' || b.status === 'Refund_Requested';
+    const isRefDone =
+      b.paymentStatus === 'Refund Selesai / Dibatalkan' ||
+      b.status === 'Refund_Completed' ||
+      b.status === 'Cancelled';
+    return !isRefWait && !isRefDone && isOrderLockedStatus(b) && b.status !== 'Completed';
+  };
+
+  const newIncomingCount = bookings.filter(isOrderNewIncoming).length;
+  const paidUnverifiedCount = newIncomingCount;
+  const completedCount = bookings.filter((b) => {
+    const isRefWait =
+      b.paymentStatus === 'Menunggu Cek Refund Admin' || b.status === 'Refund_Requested';
+    const isRefDone =
+      b.paymentStatus === 'Refund Selesai / Dibatalkan' ||
+      b.status === 'Refund_Completed' ||
+      b.status === 'Cancelled';
+    return !isRefWait && !isRefDone && b.status === 'Completed';
+  }).length;
   const refundPendingCount = bookings.filter(
     (b) => b.paymentStatus === 'Menunggu Cek Refund Admin' || b.status === 'Refund_Requested'
+  ).length;
+  const refundDoneCount = bookings.filter(
+    (b) =>
+      b.paymentStatus === 'Refund Selesai / Dibatalkan' ||
+      b.status === 'Refund_Completed' ||
+      b.status === 'Cancelled'
   ).length;
 
   const filteredBookings = bookings.filter((b) => {
@@ -165,9 +189,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       b.paymentStatus === 'Refund Selesai / Dibatalkan' ||
       b.status === 'Refund_Completed' ||
       b.status === 'Cancelled';
+    if (orderFilter === 'new_incoming') return isOrderNewIncoming(b);
     if (orderFilter === 'refund_pending') return isRefWait;
     if (orderFilter === 'refund_done') return isRefDone;
-    if (orderFilter === 'active') return !isRefWait && !isRefDone;
+    if (orderFilter === 'active') return !isRefWait && !isRefDone && b.status === 'Completed';
     return true;
   });
 
@@ -310,61 +335,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Konten Utama Admin */}
       <div className="p-3.5 space-y-3.5 flex-1">
-        {/* Sub-Tab Navigation Bar (4 Tab Admin) */}
-        <div className="grid grid-cols-4 gap-1 bg-stone-200 p-1 rounded-2xl text-[11px] font-black">
-          <button
-            type="button"
-            onClick={() => setAdminSubTab('orders')}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 transition ${
-              adminSubTab === 'orders'
-                ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-700 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-clipboard-check flex-shrink-0"></i>
-            <span className="truncate">Pesanan ({bookings.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenNotifTab}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 relative transition ${
-              adminSubTab === 'notifications'
-                ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-700 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-bullhorn flex-shrink-0"></i>
-            <span className="truncate">Notif & Bot</span>
-            {unreadAdminNotifs > 0 && (
-              <span className="w-2 h-2 rounded-full bg-red-500 inline-block flex-shrink-0"></span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setAdminSubTab('schedule')}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 transition ${
-              adminSubTab === 'schedule'
-                ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-700 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-sliders flex-shrink-0"></i>
-            <span className="truncate">Atur Jam</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setAdminSubTab('account')}
-            className={`tactile-btn py-2 px-1 rounded-xl flex items-center justify-center gap-1 min-w-0 transition ${
-              adminSubTab === 'account'
-                ? 'bg-[#0B261C] text-[#D4AF37] shadow'
-                : 'text-stone-700 hover:text-stone-900'
-            }`}
-          >
-            <i className="fa-solid fa-user-shield flex-shrink-0"></i>
-            <span className="truncate">Akun</span>
-          </button>
-        </div>
-
         {/* =============================================================== */}
         {/* SUB-TAB 1: DAFTAR PESANAN & VERIFIKASI REFUND ADMIN             */}
         {/* =============================================================== */}
@@ -401,83 +371,142 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            {/* Filter Tab Kelola Pesanan */}
-            <div className="grid grid-cols-4 gap-1 bg-white p-1 rounded-2xl border border-stone-200 text-[11px] font-black shadow-2xs">
-              <button
-                type="button"
-                onClick={() => setOrderFilter('all')}
-                className={`py-2 px-1 rounded-xl transition truncate ${
-                  orderFilter === 'all'
-                    ? 'bg-[#0B261C] text-[#D4AF37]'
-                    : 'text-stone-700 hover:text-stone-900'
-                }`}
-              >
-                Semua ({bookings.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderFilter('refund_pending')}
-                className={`py-2 px-1 rounded-xl transition flex items-center justify-center gap-1 min-w-0 ${
-                  orderFilter === 'refund_pending'
-                    ? 'bg-amber-500 text-stone-950'
-                    : refundPendingCount > 0
-                    ? 'bg-amber-50 text-amber-900 border border-amber-300'
-                    : 'text-stone-700 hover:text-stone-900'
-                }`}
-              >
-                <span className="truncate">Refund</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-black/15 text-[10px] flex-shrink-0">
-                  {refundPendingCount}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderFilter('active')}
-                className={`py-2 px-1 rounded-xl transition truncate ${
-                  orderFilter === 'active'
-                    ? 'bg-[#0B261C] text-[#D4AF37]'
-                    : 'text-stone-700 hover:text-stone-900'
-                }`}
-              >
-                Aktif / Lunas
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderFilter('refund_done')}
-                className={`py-2 px-1 rounded-xl transition truncate ${
-                  orderFilter === 'refund_done'
-                    ? 'bg-[#0B261C] text-[#D4AF37]'
-                    : 'text-stone-700 hover:text-stone-900'
-                }`}
-              >
-                Batal / Refund
-              </button>
+            {/* Filter Tab Kelola Pesanan (Fokus Booking Baru Masuk Terpisah dari Semua) */}
+            <div className="bg-white p-2 rounded-2xl border border-stone-200 space-y-1.5 shadow-2xs">
+              <div className="grid grid-cols-2 gap-1.5 text-xs font-black">
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('new_incoming')}
+                  className={`py-2.5 px-2.5 rounded-xl transition flex items-center justify-center gap-1.5 min-w-0 ${
+                    orderFilter === 'new_incoming'
+                      ? 'bg-[#0B261C] text-[#D4AF37] shadow-xs border border-[#D4AF37]/50'
+                      : newIncomingCount > 0
+                      ? 'bg-emerald-50 text-emerald-950 border border-emerald-300'
+                      : 'bg-stone-50 text-stone-700 hover:text-stone-900 border border-stone-200'
+                  }`}
+                >
+                  <i className="fa-solid fa-bell text-[11px] flex-shrink-0"></i>
+                  <span className="truncate">Booking Baru</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[10px] leading-none flex-shrink-0 ${
+                      orderFilter === 'new_incoming'
+                        ? 'bg-[#D4AF37] text-[#0B261C]'
+                        : newIncomingCount > 0
+                        ? 'bg-emerald-700 text-white animate-pulse'
+                        : 'bg-stone-200 text-stone-700'
+                    }`}
+                  >
+                    {newIncomingCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('all')}
+                  className={`py-2.5 px-2.5 rounded-xl transition flex items-center justify-center gap-1.5 min-w-0 ${
+                    orderFilter === 'all'
+                      ? 'bg-[#0B261C] text-[#D4AF37] shadow-xs border border-[#D4AF37]/50'
+                      : 'bg-stone-50 text-stone-700 hover:text-stone-900 border border-stone-200'
+                  }`}
+                >
+                  <i className="fa-solid fa-list-check text-[11px] flex-shrink-0"></i>
+                  <span className="truncate">Semua Pesanan ({bookings.length})</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 text-[11px] font-black">
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('active')}
+                  className={`py-2 px-1.5 rounded-xl transition truncate ${
+                    orderFilter === 'active'
+                      ? 'bg-[#0B261C] text-[#D4AF37]'
+                      : 'bg-stone-50 text-stone-700 hover:text-stone-900 border border-stone-200/80'
+                  }`}
+                >
+                  Selesai ({completedCount})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('refund_pending')}
+                  className={`py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1 min-w-0 ${
+                    orderFilter === 'refund_pending'
+                      ? 'bg-amber-500 text-stone-950'
+                      : refundPendingCount > 0
+                      ? 'bg-amber-50 text-amber-900 border border-amber-300'
+                      : 'bg-stone-50 text-stone-700 hover:text-stone-900 border border-stone-200/80'
+                  }`}
+                >
+                  <span className="truncate">Refund</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-black/15 text-[10px] leading-none flex-shrink-0">
+                    {refundPendingCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('refund_done')}
+                  className={`py-2 px-1.5 rounded-xl transition truncate ${
+                    orderFilter === 'refund_done'
+                      ? 'bg-[#0B261C] text-[#D4AF37]'
+                      : 'bg-stone-50 text-stone-700 hover:text-stone-900 border border-stone-200/80'
+                  }`}
+                >
+                  Batal ({refundDoneCount})
+                </button>
+              </div>
             </div>
 
             <div className="flex justify-between items-center gap-2 px-1 flex-wrap">
               <h2 className="text-xs font-black uppercase tracking-wider text-stone-800">
-                Kelola Pesanan & Pengelolaan Refund
+                {orderFilter === 'new_incoming'
+                  ? `Daftar Booking Baru Masuk (${newIncomingCount})`
+                  : orderFilter === 'active'
+                  ? `Pesanan Selesai Treatment (${completedCount})`
+                  : orderFilter === 'refund_pending'
+                  ? `Menunggu Cek Refund (${refundPendingCount})`
+                  : orderFilter === 'refund_done'
+                  ? `Riwayat Batal / Refund (${refundDoneCount})`
+                  : `Semua Riwayat Pesanan (${bookings.length})`}
               </h2>
               <span className="text-[11px] font-bold text-emerald-800">
-                Batal / Refund = Jam Terbuka Kembali
+                Non-Cash = Otomatis Lunas
               </span>
             </div>
 
             {filteredBookings.length === 0 ? (
-              <div className="bg-white p-6 rounded-2xl border border-stone-200 text-center text-stone-500 text-sm font-medium">
-                Tidak ada pesanan pada filter ini.
+              <div className="bg-white p-6 rounded-2xl border border-stone-200 text-center space-y-1.5">
+                <p className="text-stone-700 text-sm font-extrabold">
+                  {orderFilter === 'new_incoming'
+                    ? 'Belum ada booking baru yang masuk saat ini.'
+                    : 'Tidak ada pesanan pada filter ini.'}
+                </p>
+                {orderFilter === 'new_incoming' && bookings.length > 0 && (
+                  <p className="text-xs text-stone-500">
+                    Klik tab <b>Semua Pesanan ({bookings.length})</b> atau <b>Selesai ({completedCount})</b> untuk melihat riwayat pesanan lainnya.
+                  </p>
+                )}
               </div>
             ) : (
               filteredBookings.map((b) => {
                 const isPaid = isOrderLockedStatus(b);
-                const isConfirmedAcc =
-                  b.paymentStatus === 'Terkonfirmasi (ACC Admin)' || b.status === 'Verified';
-                const isWaitingVerify = b.paymentStatus === 'Menunggu Verifikasi Admin';
                 const isCashOrder =
                   b.payMethodType === 'cash' ||
                   b.paymentStatus === 'Booking Cash (Bayar di Lokasi)' ||
                   b.payMethod.toLowerCase().includes('cash') ||
                   b.payMethod.toLowerCase().includes('tempat');
+                const isCashPaid =
+                  isCashOrder &&
+                  (b.paymentStatus === 'Lunas' ||
+                    b.paymentStatus === 'Terkonfirmasi (ACC Admin)' ||
+                    b.status === 'Verified' ||
+                    b.status === 'Completed');
+                const isLunasOrder = (!isCashOrder && isPaid) || isCashPaid;
+                const isConfirmedAcc =
+                  b.paymentStatus === 'Terkonfirmasi (ACC Admin)' ||
+                  b.status === 'Verified' ||
+                  b.status === 'Completed';
                 const isFailed = b.paymentStatus === 'Gagal';
                 const isRefundWaiting =
                   b.paymentStatus === 'Menunggu Cek Refund Admin' ||
@@ -487,6 +516,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   b.status === 'Refund_Completed' ||
                   b.status === 'Cancelled';
                 const isCompleted = b.status === 'Completed';
+                const isNewOrderBadge =
+                  !isRefundWaiting && !isRefundDone && isPaid && !isCompleted;
                 const confirmMsg = buildAdminWaConfirmationMessage(b);
                 const approveRefundWa = buildAdminApproveRefundWaMessage(b);
                 const isConfirmOpen = expandedConfirmOrderId === b.id;
@@ -499,18 +530,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         ? 'border-2 border-amber-400 bg-amber-50/35'
                         : isRefundDone
                         ? 'border-stone-200 bg-stone-50/80 opacity-90'
-                        : isConfirmedAcc
-                        ? 'border-2 border-emerald-500 bg-emerald-50/20'
+                        : isNewOrderBadge
+                        ? 'border-2 border-emerald-600 bg-emerald-50/15'
                         : isPaid
                         ? 'border-stone-200'
                         : 'border-amber-300 bg-amber-50/30'
                     }`}
                   >
-                    {/* Baris Atas: ID Pesanan & Status Pembayaran / Verifikasi / Refund Badge (Tidak Tabrakan) */}
+                    {/* Baris Atas: ID Pesanan & Status Pembayaran / Verifikasi / Refund Badge */}
                     <div className="flex flex-wrap justify-between items-center gap-2 pb-2 border-b border-stone-200/80">
-                      <span className="font-mono text-xs font-black text-stone-500">
-                        #GA-{String(b.id).slice(-6)}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono text-xs font-black text-stone-500">
+                          #GA-{String(b.id).slice(-6)}
+                        </span>
+                        {isNewOrderBadge && (
+                          <span className="text-[10px] font-black bg-[#0B261C] text-[#D4AF37] px-2 py-0.5 rounded-full">
+                            🆕 BARU
+                          </span>
+                        )}
+                      </div>
 
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {isRefundWaiting ? (
@@ -525,23 +563,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               {b.status === 'Refund_Completed' ? 'REFUND SELESAI' : 'DIBATALKAN'}
                             </span>
                           </span>
-                        ) : isConfirmedAcc ? (
+                        ) : isLunasOrder ? (
                           <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-500 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
                             <i className="fa-solid fa-circle-check text-emerald-600"></i>
-                            <span>TERKONFIRMASI (ACC ADMIN)</span>
-                          </span>
-                        ) : isWaitingVerify ? (
-                          <span className="text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1 animate-pulse">
-                            <i className="fa-solid fa-hourglass-half text-amber-700"></i>
-                            <span>MENUNGGU VERIFIKASI ADMIN</span>
+                            <span>
+                              LUNAS ({isCashOrder ? 'CASH' : b.payMethodType === 'qris' ? 'QRIS' : 'TRANSFER'})
+                            </span>
                           </span>
                         ) : isCashOrder && isPaid ? (
                           <span className="text-[10px] font-black bg-amber-100 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                            <span>💵 BOOKING CASH (DI LOKASI)</span>
-                          </span>
-                        ) : isPaid ? (
-                          <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-400 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
-                            <i className="fa-solid fa-circle-check text-emerald-600"></i> BAYAR BERHASIL
+                            <span>💵 BOOKING CASH (BAYAR DI LOKASI)</span>
                           </span>
                         ) : isFailed ? (
                           <span className="text-[10px] font-black bg-red-100 text-red-800 border border-red-300 px-2.5 py-0.5 rounded-full inline-flex items-center gap-1">
@@ -847,7 +878,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
 
                     {/* ========================================================= */}
-                    {/* TOMBOL ACC / VERIFIKASI PESANAN & PESAN WA OTOMATIS       */}
+                    {/* TOMBOL KONFIRMASI / LUNAS CASH & PESAN WA OTOMATIS        */}
                     {/* ========================================================= */}
                     {isPaid && !isRefundWaiting && !isRefundDone && (
                       <div className="bg-emerald-50/90 p-3 rounded-2xl border border-emerald-300 space-y-2">
@@ -855,9 +886,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                             <i className="fa-solid fa-user-check text-emerald-700 text-xs"></i>
                             <span>
-                              {isConfirmedAcc
-                                ? `Status: Terkonfirmasi (ACC Admin)`
-                                : `Verifikasi Pesanan & Kirim WA ke ${b.customer}:`}
+                              {isLunasOrder
+                                ? `Status Pembayaran: LUNAS (${
+                                    isCashOrder
+                                      ? 'Cash'
+                                      : b.payMethodType === 'qris'
+                                      ? 'QRIS'
+                                      : 'Transfer Bank'
+                                  })`
+                                : `Booking Cash (Bayar di Lokasi) — ${b.customer}:`}
                             </span>
                           </span>
                           <button
@@ -879,17 +916,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <button
                               type="button"
                               onClick={() =>
-                                onCopyText(confirmMsg.text, 'Kata-kata Verifikasi ACC WA Pelanggan')
+                                onCopyText(confirmMsg.text, 'Kata-kata Konfirmasi WA Pelanggan')
                               }
                               className="tactile-btn w-full bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold py-2 rounded-lg text-xs"
                             >
                               <i className="fa-regular fa-copy mr-1"></i>
-                              Salin Teks Verifikasi WA
+                              Salin Teks Konfirmasi WA
                             </button>
                           </div>
                         )}
 
-                        {!isConfirmedAcc && !isCompleted ? (
+                        {!isLunasOrder && !isCompleted ? (
                           <a
                             href={confirmMsg.url}
                             target="_blank"
@@ -897,14 +934,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onClick={() => onVerifyPayment(b.id)}
                             className="tactile-btn gold-shimmer-card w-full min-h-[44px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-300 shadow-sm flex items-center justify-center gap-2 text-center"
                           >
-                            <i className="fa-solid fa-circle-check text-emerald-900 text-sm"></i>
-                            <span>ACC / Verifikasi Pesanan</span>
+                            <i className="fa-solid fa-money-bill-wave text-emerald-900 text-sm"></i>
+                            <span>Terima Pembayaran Cash (Ubah Jadi LUNAS) & Kirim WA</span>
+                          </a>
+                        ) : !isConfirmedAcc && !isCompleted ? (
+                          <a
+                            href={confirmMsg.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => onVerifyPayment(b.id)}
+                            className="tactile-btn w-full min-h-[42px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 text-center"
+                          >
+                            <i className="fa-brands fa-whatsapp text-sm"></i>
+                            <span>Kirim WA Konfirmasi Jadwal (Sudah Lunas)</span>
                           </a>
                         ) : (
                           <div className="flex items-center justify-between gap-2 flex-wrap bg-emerald-100/90 border border-emerald-300 rounded-xl px-3 py-2">
                             <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                               <i className="fa-solid fa-circle-check text-emerald-600"></i>
-                              <span>Terkonfirmasi (ACC Admin)</span>
+                              <span>Terkonfirmasi & Lunas</span>
                             </span>
                             <a
                               href={confirmMsg.url}
@@ -913,7 +961,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               className="tactile-btn bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-1.5 px-3 rounded-lg text-xs flex items-center gap-1 shadow-2xs"
                             >
                               <i className="fa-brands fa-whatsapp"></i>
-                              <span>Kirim WA ACC</span>
+                              <span>Kirim WA</span>
                             </a>
                           </div>
                         )}

@@ -74,6 +74,7 @@ export interface BookingOrder {
   vaNumber?: string;
   paymentStatus:
     | 'Pending'
+    | 'Lunas'
     | 'Berhasil'
     | 'Menunggu Verifikasi Admin'
     | 'Booking Cash (Bayar di Lokasi)'
