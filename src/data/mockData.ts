@@ -253,43 +253,67 @@ export const ANATOMY_LOCATIONS: string[] = [
   'Pergelangan Tangan (Wrist)',
 ];
 
-// Sistem Poin Loyalitas Bertahap (Micro-Rewards) — Bukan untuk potongan harga uang tunai (cut: 0)
+// Sistem Poin Loyalitas Bertahap (Micro-Rewards) — Dikelola langsung oleh Admin
 export const POINT_REWARDS: PointReward[] = [
   {
     id: 'none',
+    title: 'Simpan Poin (Tabung Poin Loyalitas)',
     label: 'Simpan Poin (Tabung Poin Loyalitas)',
     cost: 0,
     cut: 0,
+    description: 'Simpan poin untuk ditukarkan nanti.',
+    available: true,
+    stockInfo: 'Tersedia',
   },
   {
     id: 'tier_30',
+    title: '🍵 Gratis Wedang Rempah / Jahe Merah & Aromaterapi',
     label: '🍵 Tahap 1 (30 Poin): Gratis Wedang Rempah / Jahe Merah & Aromaterapi',
     cost: 30,
     cut: 0,
+    description: 'Minuman herbal penghangat tubuh & relaksasi aromaterapi seusai sesi terapi.',
+    available: true,
+    stockInfo: 'Tersedia',
   },
   {
     id: 'tier_60',
+    title: '💆‍♀️ Gratis Ekstra Durasi Pijat Kepala & Leher (+15 Menit)',
     label: '💆‍♀️ Tahap 2 (60 Poin): Gratis Ekstra Durasi Pijat Kepala & Leher (+15 Menit)',
     cost: 60,
     cut: 0,
+    description: 'Tambahan waktu relaksasi fokus area kepala, pelipis & leher saat sesi terapi.',
+    available: true,
+    stockInfo: 'Tersedia',
   },
   {
     id: 'tier_100',
+    title: '🎁 GRATIS Layanan Totok Wajah (30 - 45 Menit)',
     label: '🎁 Tahap 3 (100 Poin): Gratis Layanan Totok Wajah (30-45 Menit)',
     cost: 100,
     cut: 0,
+    description: 'Senilai Rp 100.000 — Melancarkan peredaran darah & menyegarkan wajah.',
+    available: true,
+    stockInfo: 'Tersedia',
   },
   {
     id: 'tier_150',
+    title: '🎁 GRATIS Bekam / Lulur Badan / Willness Massage 60m',
     label: '🎁 Tahap 4 (150 Poin): Gratis Layanan Bekam / Lulur Badan / Willness 60m',
     cost: 150,
     cut: 0,
+    description: 'Senilai Rp 150.000 — Bebas pilih 1 layanan gratis saat kunjungan terapi.',
+    available: true,
+    stockInfo: 'Tersedia',
   },
   {
     id: 'tier_250',
+    title: '👑 GRATIS Sesi Injury Muscle / Hot Stone / Willness 90m',
     label: '👑 Tahap 5 (250 Poin): Gratis Sesi Injury Muscle / Hot Stone / Willness 90m',
     cost: 250,
     cut: 0,
+    description: 'Senilai Rp 250.000 — Apresiasi tertinggi untuk member setia Griya Ayu.',
+    available: true,
+    stockInfo: 'Tersedia',
   },
 ];
 

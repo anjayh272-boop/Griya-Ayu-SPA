@@ -11,6 +11,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase.ts';
 import {
   AppNotification,
   BookingOrder,
+  PointReward,
   TimeSlot,
   User,
 } from '../types/index.ts';
@@ -30,6 +31,7 @@ export interface GlobalSpaSettingsDoc {
   closedWeekdays?: number[];
   closedSpecificDates?: string[];
   adminProfile?: User;
+  pointRewards?: PointReward[];
   updatedAt?: number;
 }
 

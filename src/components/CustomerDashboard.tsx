@@ -8,6 +8,7 @@ import {
   PaymentMethodType,
   RefundRequestInfo,
   ServiceGridCategory,
+  PointReward,
 } from '../types/index.ts';
 import {
   calculateOrderPricing,
@@ -47,6 +48,7 @@ interface CustomerDashboardProps {
   bookings: BookingOrder[];
   notifications: AppNotification[];
   masterTimeSlots: TimeSlot[];
+  pointRewards?: PointReward[];
   closedWeekdays: number[];
   closedSpecificDates: string[];
   language: Language;
@@ -76,6 +78,7 @@ interface CustomerDashboardProps {
     silentReceipt?: boolean;
   }) => BookingOrder | null;
   onRequestRefund?: (orderId: number, refundInfo: RefundRequestInfo) => void;
+  onRedeemPointReward?: (reward: PointReward) => void;
   onCopyText?: (text: string, label: string) => void;
   onViewReceipt: (order: BookingOrder) => void;
   onMarkNotificationsRead: () => void;
@@ -88,6 +91,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   bookings,
   notifications,
   masterTimeSlots,
+  pointRewards,
   closedWeekdays,
   closedSpecificDates,
   language,
@@ -96,6 +100,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   onOpenPaymentModal,
   onConfirmWizardBooking,
   onRequestRefund,
+  onRedeemPointReward,
   onCopyText,
   onViewReceipt,
   onMarkNotificationsRead,
@@ -121,6 +126,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [serviceMode, setServiceMode] = useState<'single' | 'package'>('single');
   const [selectedGridCategory, setSelectedGridCategory] = useState<'all' | ServiceGridCategory>('all');
   const [showPriceListImages, setShowPriceListImages] = useState<boolean>(false);
+  const [zoomedBrochure, setZoomedBrochure] = useState<{
+    src: string;
+    title: string;
+    subtitle: string;
+  } | null>(null);
+  const [brochureZoomLevel, setBrochureZoomLevel] = useState<number>(1);
   const [chosenSingleIds, setChosenSingleIds] = useState<string[]>([]);
   const [chosenPackageId, setChosenPackageId] = useState<string>('');
   const [injurySpotsByService, setInjurySpotsByService] = useState<Record<string, string[]>>({
@@ -141,8 +152,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   // Time slot selection
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
 
-  // Point reward selection (di Langkah 3)
+  // Point reward selection (di Langkah 3 & Modal Konfirmasi Tukar Poin di Tab Poin)
   const [selectedRewardId, setSelectedRewardId] = useState<string>('none');
+  const [redeemConfirmReward, setRedeemConfirmReward] = useState<PointReward | null>(null);
 
   // State Pembayaran di Langkah 3 (QRIS Timer 20 Menit + Metode + Bukti Bayar + ID Pesanan Pending di Riwayat)
   const [step3PendingOrderId, setStep3PendingOrderId] = useState<number | null>(null);
@@ -336,6 +348,27 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     }
   }, [nowMs, todayIso, selectedDateIso, selectedTimeSlot, calendarDays]);
 
+  // Daftar reward poin yang dikelola Admin (hanya menampilkan yang aktif/tersedia di halaman pelanggan)
+  const allManagedRewards = pointRewards && pointRewards.length > 0 ? pointRewards : POINT_REWARDS;
+  const catalogPointRewards = React.useMemo(
+    () =>
+      allManagedRewards
+        .filter((r) => r.id !== 'none' && r.available !== false)
+        .sort((a, b) => a.cost - b.cost),
+    [allManagedRewards]
+  );
+  const activePointRewardsWithNone = React.useMemo(() => {
+    const noneOption: PointReward = {
+      id: 'none',
+      title: 'Simpan Poin (Tabung Poin Loyalitas)',
+      label: 'Simpan Poin (Tabung Poin Loyalitas)',
+      cost: 0,
+      cut: 0,
+      available: true,
+    };
+    return [noneOption, ...catalogPointRewards];
+  }, [catalogPointRewards]);
+
   // Pricing calculation
   const pricing = calculateOrderPricing(
     serviceMode,
@@ -344,7 +377,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     SINGLE_CATALOG,
     PACKAGE_CATALOG,
     selectedRewardId,
-    POINT_REWARDS,
+    activePointRewardsWithNone,
     currentUser.points,
     injurySpotsByService
   );
@@ -759,30 +792,71 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   </button>
                 </div>
 
-                {/* Brosur Price List Resmi (Collapsible) */}
+                {/* Brosur Price List Resmi (Collapsible + Bisa Diklik & Zoom) */}
                 {showPriceListImages && (
-                  <div className="p-3 rounded-2xl bg-stone-900 text-white space-y-2 border border-[#D4AF37]/60 animate-page-enter">
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div className="space-y-1">
-                        <img
-                          src="/assets/aistudio/image_2b8cf505.png"
-                          alt="Price List Griya Ayu Sport Massage"
-                          className="w-full rounded-xl border border-[#D4AF37]/40 object-cover"
-                        />
-                        <p className="text-xs text-center font-bold text-amber-200">
+                  <div className="p-3.5 rounded-2xl bg-stone-900 text-white space-y-3 border border-[#D4AF37]/60 animate-page-enter">
+                    <div className="flex items-center justify-between gap-2 bg-white/10 px-3 py-2 rounded-xl border border-[#D4AF37]/30">
+                      <p className="text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                        <i className="fa-solid fa-magnifying-glass-plus text-[#D4AF37]"></i>
+                        <span>Klik gambar brosur untuk perbesar &amp; zoom agar mudah dibaca</span>
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setZoomedBrochure({
+                            src: '/assets/aistudio/image_2b8cf505.png',
+                            title: 'Brosur Griya Ayu Sport Massage',
+                            subtitle: 'Semua Gender (👨👩)',
+                          });
+                          setBrochureZoomLevel(1.5);
+                        }}
+                        className="tactile-btn group text-left space-y-1.5 bg-stone-800/90 hover:bg-stone-800 p-2 rounded-xl border border-[#D4AF37]/40 hover:border-[#D4AF37] transition focus:outline-none"
+                      >
+                        <div className="relative overflow-hidden rounded-lg">
+                          <img
+                            src="/assets/aistudio/image_2b8cf505.png"
+                            alt="Price List Griya Ayu Sport Massage"
+                            className="w-full rounded-lg object-cover group-hover:scale-105 transition duration-200"
+                          />
+                          <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-1 rounded-lg border border-[#D4AF37]/60 flex items-center gap-1 shadow">
+                            <i className="fa-solid fa-magnifying-glass-plus"></i>
+                            <span>Perbesar</span>
+                          </span>
+                        </div>
+                        <p className="text-xs text-center font-bold text-amber-200 pt-0.5">
                           Semua Gender (👨👩)
                         </p>
-                      </div>
-                      <div className="space-y-1">
-                        <img
-                          src="/assets/aistudio/image_2d1f81d9.png"
-                          alt="Price List Griya Ayu Willness Massage"
-                          className="w-full rounded-xl border border-[#D4AF37]/40 object-cover"
-                        />
-                        <p className="text-xs text-center font-bold text-pink-200">
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setZoomedBrochure({
+                            src: '/assets/aistudio/image_2d1f81d9.png',
+                            title: 'Brosur Griya Ayu Willness Massage',
+                            subtitle: 'Khusus Wanita (👩)',
+                          });
+                          setBrochureZoomLevel(1.5);
+                        }}
+                        className="tactile-btn group text-left space-y-1.5 bg-stone-800/90 hover:bg-stone-800 p-2 rounded-xl border border-[#D4AF37]/40 hover:border-[#D4AF37] transition focus:outline-none"
+                      >
+                        <div className="relative overflow-hidden rounded-lg">
+                          <img
+                            src="/assets/aistudio/image_2d1f81d9.png"
+                            alt="Price List Griya Ayu Willness Massage"
+                            className="w-full rounded-lg object-cover group-hover:scale-105 transition duration-200"
+                          />
+                          <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-1 rounded-lg border border-[#D4AF37]/60 flex items-center gap-1 shadow">
+                            <i className="fa-solid fa-magnifying-glass-plus"></i>
+                            <span>Perbesar</span>
+                          </span>
+                        </div>
+                        <p className="text-xs text-center font-bold text-pink-200 pt-0.5">
                           Khusus Wanita (👩)
                         </p>
-                      </div>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -1730,11 +1804,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     onChange={(e) => setSelectedRewardId(e.target.value)}
                     className="w-full bg-[#144533] border border-[#D4AF37]/50 text-white text-xs font-bold p-3 rounded-xl focus:outline-none"
                   >
-                    {POINT_REWARDS.map((r) => {
+                    {activePointRewardsWithNone.map((r) => {
                       const hasEnoughPoints = currentUser.points >= r.cost;
+                      const displayLabel =
+                        r.id === 'none'
+                          ? r.label
+                          : `🎁 (${r.cost} Poin) ${r.title || r.label}`;
                       return (
                         <option key={r.id} value={r.id} disabled={!hasEnoughPoints}>
-                          {r.label}{' '}
+                          {displayLabel}{' '}
                           {!hasEnoughPoints ? `(Kurang ${r.cost - currentUser.points} Poin)` : ''}
                         </option>
                       );
@@ -3010,129 +3088,279 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       )}
 
       {/* ================================================================= */}
-      {/* TAB 4: SISTEM POIN LOYALITAS BERTAHAP (MICRO-REWARDS)             */}
+      {/* TAB 4: HALAMAN POIN PELANGGAN (TERHUBUNG KATALOG REWARD ADMIN)    */}
       {/* ================================================================= */}
       {customerTab === 'rewards' && (
-        <div className="p-4 space-y-3.5 flex-1 animate-page-enter">
-          <div className="bg-white p-4 rounded-2xl border border-stone-200/90 shadow-sm space-y-3.5">
+        <div className="p-4 space-y-4 flex-1 animate-page-enter">
+          <div className="bg-white p-4 rounded-2xl border border-stone-200/90 shadow-sm space-y-4">
+            {/* Header Saldo Poin Pelanggan */}
             <div className="flex justify-between items-start gap-3">
               <div>
-                <h2 className="text-sm font-black text-[#0B261C] flex items-center gap-1.5">
-                  <i className="fa-solid fa-award text-amber-500"></i>
+                <h2 className="text-base font-black text-[#0B261C] flex items-center gap-2">
+                  <i className="fa-solid fa-crown text-amber-500"></i>
                   <span>
-                    {isEn
-                      ? 'Tiered Loyalty Micro-Rewards'
-                      : 'Poin Loyalitas Bertahap (Micro-Rewards)'}
+                    {isEn ? 'Loyalty Points & Rewards Catalog' : 'Katalog Penukaran Poin Member'}
                   </span>
                 </h2>
-                <p className="text-xs text-stone-500 leading-relaxed mt-1">
-                  Kumpulkan poin dari setiap kedatangan terapi. Poin ditukarkan dengan{' '}
-                  <b>Bonus Layanan / Micro-Rewards Gratis Bertahap</b> (bukan potongan harga uang
-                  tunai).
+                <p className="text-xs sm:text-sm text-stone-600 leading-relaxed mt-1">
+                  Kumpulkan poin dari setiap kedatangan terapi dan tukarkan langsung dengan{' '}
+                  <b>Reward / Hadiah Spesial</b> dari Griya Ayu di bawah ini.
                 </p>
               </div>
-              <span className="text-xs font-black bg-[#0B261C] text-[#D4AF37] px-3 py-1.5 rounded-xl whitespace-nowrap border border-[#D4AF37]/50 shadow-xs">
-                👑 {currentUser.points} Poin
-              </span>
+              <div className="bg-[#0B261C] text-[#D4AF37] px-3.5 py-2 rounded-2xl whitespace-nowrap border-2 border-[#D4AF37] shadow-sm text-right flex-shrink-0">
+                <span className="text-[10px] font-bold text-emerald-200 block uppercase leading-none">
+                  Saldo Poin Anda
+                </span>
+                <span className="text-sm sm:text-base font-black block mt-0.5">
+                  👑 {currentUser.points} Poin
+                </span>
+              </div>
             </div>
 
             {/* Panduan Perolehan Poin Setiap Transaksi */}
             <div className="bg-[#0B261C] text-white p-3.5 rounded-2xl border border-[#D4AF37]/50 space-y-2 shadow-xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37] block">
+              <span className="text-xs font-black uppercase tracking-wider text-[#D4AF37] block">
                 📈 Skema Perolehan Poin Setiap Transaksi:
               </span>
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-xs sm:text-sm">
                 <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200">Layanan Rp 100rb</span>
+                  <span className="text-stone-200 font-semibold">Layanan Rp 100rb</span>
                   <span className="font-black text-amber-300">+5 Poin</span>
                 </div>
                 <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200">Layanan Rp 150rb</span>
+                  <span className="text-stone-200 font-semibold">Layanan Rp 150rb</span>
                   <span className="font-black text-amber-300">+10 Poin</span>
                 </div>
                 <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200">Layanan Rp 250rb</span>
+                  <span className="text-stone-200 font-semibold">Layanan Rp 250rb</span>
                   <span className="font-black text-amber-300">+15 Poin</span>
                 </div>
                 <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200">Layanan Rp 400rb</span>
+                  <span className="text-stone-200 font-semibold">Layanan Rp 400rb</span>
                   <span className="font-black text-amber-300">+20 Poin</span>
                 </div>
               </div>
             </div>
 
-            {/* Daftar 5 Tahap Micro-Rewards */}
-            <div className="space-y-2.5 pt-1">
-              {[
-                {
-                  tier: 'Tahap 1 • Micro-Reward Awal',
-                  title: '🍵 Gratis Wedang Rempah / Jahe Merah & Aromaterapi',
-                  desc: 'Minuman herbal penghangat tubuh & relaksasi aromaterapi seusai sesi.',
-                  cost: 30,
-                },
-                {
-                  tier: 'Tahap 2 • Micro-Reward Ekstra Durasi',
-                  title: '💆‍♀️ Gratis Ekstra Durasi Pijat Kepala & Leher (+15 Menit)',
-                  desc: 'Tambahan waktu relaksasi fokus area kepala, pelipis & leher.',
-                  cost: 60,
-                },
-                {
-                  tier: 'Tahap 3 • Reward Layanan Wajah',
-                  title: '🎁 GRATIS Layanan Totok Wajah (30 - 45 Menit)',
-                  desc: 'Senilai Rp 100.000 — Melancarkan peredaran darah & menyegarkan wajah.',
-                  cost: 100,
-                },
-                {
-                  tier: 'Tahap 4 • Reward Layanan Populer',
-                  title: '🎁 GRATIS Bekam / Lulur Badan / Willness Massage 60m',
-                  desc: 'Senilai Rp 150.000 — Bebas pilih 1 layanan gratis saat kunjungan.',
-                  cost: 150,
-                },
-                {
-                  tier: 'Tahap 5 • VIP Grand Reward',
-                  title: '👑 GRATIS Sesi Injury Muscle / Hot Stone / Willness 90m',
-                  desc: 'Senilai Rp 250.000 — Apresiasi tertinggi untuk member setia Griya Ayu.',
-                  cost: 250,
-                },
-              ].map((item) => {
-                const unlocked = currentUser.points >= item.cost;
-                return (
-                  <div
-                    key={item.cost}
-                    className={`p-3.5 rounded-2xl border shadow-xs flex justify-between items-center gap-3 ${
-                      unlocked
-                        ? 'bg-emerald-50/90 border-emerald-300'
-                        : 'bg-stone-50 border-stone-200/90 opacity-90'
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <span className="text-[9px] font-black uppercase tracking-wider text-emerald-800 block">
-                        {item.tier}
-                      </span>
-                      <h3 className="text-xs sm:text-sm font-black text-[#0B261C] leading-snug">
-                        {item.title}
-                      </h3>
-                      <p className="text-[11px] text-stone-500 leading-relaxed">{item.desc}</p>
+            {/* Daftar Kartu Katalog Reward yang Dikelola Admin */}
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-black text-[#0B261C] flex items-center gap-1.5">
+                  <i className="fa-solid fa-gift text-emerald-800"></i>
+                  <span>Daftar Hadiah &amp; Penawaran Poin Aktif</span>
+                </h3>
+                <span className="text-xs font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-1 rounded-lg">
+                  {catalogPointRewards.length} Reward Tersedia
+                </span>
+              </div>
+
+              {catalogPointRewards.length === 0 ? (
+                <div className="bg-stone-50 border border-stone-200 rounded-2xl p-6 text-center space-y-1.5">
+                  <i className="fa-solid fa-box-open text-2xl text-stone-400"></i>
+                  <p className="text-sm font-bold text-stone-700">
+                    Belum ada katalog reward yang aktif saat ini.
+                  </p>
+                  <p className="text-xs text-stone-500">
+                    Silakan cek kembali nanti untuk penawaran hadiah poin terbaru dari Admin Griya Ayu.
+                  </p>
+                </div>
+              ) : (
+                catalogPointRewards.map((item, idx) => {
+                  const unlocked = currentUser.points >= item.cost;
+                  const rewardTitle = item.title || item.label;
+                  const rewardDesc =
+                    item.description ||
+                    'Tukarkan poin member Anda untuk menikmati penawaran spesial dari Griya Ayu Sport Massage & SPA.';
+                  const stockBadge = item.stockInfo || 'Tersedia';
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-4 rounded-2xl border-2 transition space-y-3 ${
+                        unlocked
+                          ? 'bg-emerald-50/90 border-emerald-500/80 shadow-sm'
+                          : 'bg-stone-50 border-stone-200/90'
+                      }`}
+                    >
+                      {/* Baris Atas: Nomor Urut / Stok & Jumlah Poin yang Dibutuhkan */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-emerald-900 flex items-center gap-1.5">
+                          <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                          <span>
+                            Reward #{idx + 1} · {stockBadge}
+                          </span>
+                        </span>
+                        <span
+                          className={`text-xs sm:text-sm font-black px-3 py-1 rounded-xl border ${
+                            unlocked
+                              ? 'bg-[#0B261C] text-[#D4AF37] border-[#D4AF37]'
+                              : 'bg-stone-200 text-stone-700 border-stone-300'
+                          }`}
+                        >
+                          Butuh {item.cost} Poin
+                        </span>
+                      </div>
+
+                      {/* Nama Reward & Catatan/Keterangan dari Admin */}
+                      <div className="space-y-1.5">
+                        <h4 className="text-sm sm:text-base font-black text-[#0B261C] leading-snug">
+                          {rewardTitle}
+                        </h4>
+                        <div className="bg-white/90 border border-stone-200/80 rounded-xl p-2.5 text-xs sm:text-sm text-stone-700 leading-relaxed">
+                          <span className="font-extrabold text-[#0B261C] block text-[11px] uppercase tracking-wide mb-0.5">
+                            📝 Catatan / Keterangan Admin:
+                          </span>
+                          <p className="whitespace-pre-line">{rewardDesc}</p>
+                        </div>
+                      </div>
+
+                      {/* Baris Bawah: Info Kecukupan Poin & Tombol "Tukar Poin" */}
+                      <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-t border-stone-200/80">
+                        <div className="text-xs font-bold">
+                          {unlocked ? (
+                            <span className="text-emerald-800 flex items-center gap-1.5">
+                              <i className="fa-solid fa-unlock text-emerald-600"></i>
+                              <span>
+                                Poin Anda cukup! (Sisa {currentUser.points - item.cost} Poin jika ditukar)
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-stone-500 flex items-center gap-1.5">
+                              <i className="fa-solid fa-lock text-stone-400"></i>
+                              <span>
+                                Kurang <b>{item.cost - currentUser.points} Poin</b> lagi untuk menukar hadiah ini
+                              </span>
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={!unlocked}
+                          onClick={() => {
+                            if (!unlocked) return;
+                            setRedeemConfirmReward(item);
+                          }}
+                          className={`tactile-btn py-2.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition flex-shrink-0 ${
+                            unlocked
+                              ? 'gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] border border-amber-300 shadow-sm cursor-pointer'
+                              : 'bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed opacity-75'
+                          }`}
+                        >
+                          <i className={unlocked ? 'fa-solid fa-gift' : 'fa-solid fa-lock'}></i>
+                          <span>{unlocked ? 'Tukar Poin' : 'Tukar Poin (Belum Cukup)'}</span>
+                        </button>
+                      </div>
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <span
-                        className={`text-xs font-black px-3 py-1.5 rounded-xl block ${
-                          unlocked
-                            ? 'bg-[#0B261C] text-[#D4AF37]'
-                            : 'bg-stone-200 text-stone-700'
-                        }`}
-                      >
-                        {item.cost} Poin
-                      </span>
-                      <span className="text-[9px] font-bold text-stone-500 block mt-1">
-                        {unlocked
-                          ? '✓ Bisa Diklaim'
-                          : `Kurang ${item.cost - currentUser.points} Pts`}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL KONFIRMASI TUKAR POIN PELANGGAN                             */}
+      {/* ================================================================= */}
+      {redeemConfirmReward && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-page-enter"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Konfirmasi Tukar Poin"
+        >
+          <div className="bg-white w-full max-w-sm rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden">
+            <div className="bg-[#0B261C] text-white p-4 border-b border-[#D4AF37]/50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-gift text-[#D4AF37] text-base"></i>
+                <h3 className="text-sm sm:text-base font-black text-[#D4AF37]">
+                  Konfirmasi Tukar Poin
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRedeemConfirmReward(null)}
+                className="text-stone-300 hover:text-white text-xs font-bold px-2 py-1 rounded-lg"
+              >
+                ✕ Tutup
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3.5 text-xs sm:text-sm">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 space-y-1.5">
+                <span className="text-[11px] font-black uppercase text-emerald-800 block">
+                  Hadiah yang Dipilih:
+                </span>
+                <p className="text-sm sm:text-base font-black text-[#0B261C] leading-snug">
+                  {redeemConfirmReward.title || redeemConfirmReward.label}
+                </p>
+                {redeemConfirmReward.description && (
+                  <p className="text-xs text-stone-600 whitespace-pre-line pt-1 border-t border-emerald-200/70">
+                    {redeemConfirmReward.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-stone-50 border border-stone-200 rounded-2xl p-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-600 font-semibold">Saldo Poin Saat Ini:</span>
+                  <span className="font-black text-[#0B261C]">{currentUser.points} Poin</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-stone-600 font-semibold">Poin yang Dibutuhkan:</span>
+                  <span className="font-black text-amber-700">-{redeemConfirmReward.cost} Poin</span>
+                </div>
+                <div className="flex justify-between items-center pt-1.5 border-t border-stone-200">
+                  <span className="text-[#0B261C] font-extrabold">Sisa Poin Setelah Ditukar:</span>
+                  <span className="font-black text-emerald-700 text-sm">
+                    {Math.max(0, currentUser.points - redeemConfirmReward.cost)} Poin
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = redeemConfirmReward;
+                    setRedeemConfirmReward(null);
+                    if (onRedeemPointReward) {
+                      onRedeemPointReward(target);
+                    }
+                  }}
+                  className="tactile-btn gold-shimmer-card w-full bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-2xl text-xs sm:text-sm border border-amber-300 shadow-md flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-check-circle"></i>
+                  <span>Tukar {redeemConfirmReward.cost} Poin Sekarang</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = redeemConfirmReward;
+                    setSelectedRewardId(target.id);
+                    setRedeemConfirmReward(null);
+                    setCustomerTab('booking');
+                    onShowToast(
+                      'Reward Dipasang ke Booking! 🎁',
+                      `Reward "${target.title || target.label}" (${target.cost} Poin) telah dipilih otomatis untuk sesi booking terapi Anda.`
+                    );
+                  }}
+                  className="tactile-btn w-full bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-2.5 px-4 rounded-2xl text-xs border border-[#D4AF37]/50 flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-calendar-plus"></i>
+                  <span>Pakai Saat Booking Layanan Terapi</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRedeemConfirmReward(null)}
+                  className="tactile-btn w-full bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold py-2.5 px-4 rounded-2xl text-xs"
+                >
+                  Batal
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3153,6 +3381,154 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           onLogout={onLogout}
           onShowToast={onShowToast}
         />
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL LIGHTBOX ZOOM BROSUR HARGA (KLIK & PERBESAR MUDAH DIBACA)    */}
+      {/* ================================================================= */}
+      {zoomedBrochure && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xs flex flex-col animate-page-enter"
+          role="dialog"
+          aria-modal="true"
+          aria-label={zoomedBrochure.title}
+        >
+          {/* Header Modal Brosur */}
+          <div className="bg-[#0B261C] text-white px-4 py-3 border-b border-[#D4AF37]/50 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-sm sm:text-base font-black text-[#D4AF37] truncate">
+                {zoomedBrochure.title}
+              </h3>
+              <p className="text-xs text-stone-200 font-bold truncate">
+                {zoomedBrochure.subtitle} • Geser gambar saat di-zoom
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setZoomedBrochure(null)}
+              className="tactile-btn bg-red-600 hover:bg-red-700 text-white font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 flex-shrink-0 shadow-md"
+            >
+              <i className="fa-solid fa-xmark text-sm"></i>
+              <span>Tutup</span>
+            </button>
+          </div>
+
+          {/* Bar Pilihan Ganti Brosur & Kontrol Zoom */}
+          <div className="bg-stone-900 px-3 py-2.5 border-b border-stone-700 flex flex-wrap items-center justify-between gap-2">
+            {/* Tombol Ganti Brosur */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  setZoomedBrochure({
+                    src: '/assets/aistudio/image_2b8cf505.png',
+                    title: 'Brosur Griya Ayu Sport Massage',
+                    subtitle: 'Semua Gender (👨👩)',
+                  })
+                }
+                className={`tactile-btn text-xs font-extrabold px-3 py-1.5 rounded-xl border transition ${
+                  zoomedBrochure.src.includes('image_2b8cf505')
+                    ? 'bg-[#D4AF37] text-[#0B261C] border-amber-300 shadow'
+                    : 'bg-stone-800 text-stone-300 border-stone-600 hover:text-white'
+                }`}
+              >
+                👨👩 Semua Gender
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setZoomedBrochure({
+                    src: '/assets/aistudio/image_2d1f81d9.png',
+                    title: 'Brosur Griya Ayu Willness Massage',
+                    subtitle: 'Khusus Wanita (👩)',
+                  })
+                }
+                className={`tactile-btn text-xs font-extrabold px-3 py-1.5 rounded-xl border transition ${
+                  zoomedBrochure.src.includes('image_2d1f81d9')
+                    ? 'bg-pink-400 text-[#0B261C] border-pink-200 shadow'
+                    : 'bg-stone-800 text-stone-300 border-stone-600 hover:text-white'
+                }`}
+              >
+                👩 Khusus Wanita
+              </button>
+            </div>
+
+            {/* Kontrol Zoom (- / % / + / Reset) */}
+            <div className="flex items-center gap-1.5 ml-auto">
+              <button
+                type="button"
+                onClick={() =>
+                  setBrochureZoomLevel((prev) => Math.max(1, Number((prev - 0.5).toFixed(1))))
+                }
+                disabled={brochureZoomLevel <= 1}
+                className="tactile-btn bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-white font-black text-xs w-8 h-8 rounded-xl border border-stone-600 flex items-center justify-center"
+                title="Perkecil"
+              >
+                <i className="fa-solid fa-magnifying-glass-minus"></i>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBrochureZoomLevel((prev) => (prev >= 2.5 ? 1 : prev + 0.5))}
+                className="tactile-btn bg-amber-500/20 text-[#D4AF37] border border-[#D4AF37]/50 font-black text-xs px-2.5 py-1.5 rounded-xl min-w-[60px] text-center"
+                title="Klik untuk ubah ukuran zoom"
+              >
+                {Math.round(brochureZoomLevel * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setBrochureZoomLevel((prev) => Math.min(3.5, Number((prev + 0.5).toFixed(1))))
+                }
+                disabled={brochureZoomLevel >= 3.5}
+                className="tactile-btn bg-[#D4AF37] hover:bg-amber-400 disabled:opacity-40 text-[#0B261C] font-black text-xs w-8 h-8 rounded-xl border border-amber-200 flex items-center justify-center"
+                title="Perbesar"
+              >
+                <i className="fa-solid fa-magnifying-glass-plus"></i>
+              </button>
+            </div>
+          </div>
+
+          {/* Area Gambar Brosur yang Bisa Di-Scroll & Di-Klik untuk Zoom */}
+          <div
+            className="flex-1 overflow-auto p-3 sm:p-6 flex items-start justify-center"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setZoomedBrochure(null);
+              }
+            }}
+          >
+            <div
+              style={{
+                width: `${brochureZoomLevel * 100}%`,
+                maxWidth: brochureZoomLevel === 1 ? '480px' : 'none',
+              }}
+              className="transition-all duration-150 mx-auto"
+            >
+              <img
+                src={zoomedBrochure.src}
+                alt={zoomedBrochure.title}
+                onClick={() =>
+                  setBrochureZoomLevel((prev) => (prev >= 3 ? 1 : Number((prev + 0.5).toFixed(1))))
+                }
+                className={`w-full h-auto rounded-2xl border-2 border-[#D4AF37] shadow-2xl select-none ${
+                  brochureZoomLevel >= 3 ? 'cursor-zoom-out' : 'cursor-zoom-in'
+                }`}
+              />
+            </div>
+          </div>
+
+          {/* Footer Petunjuk Singkat */}
+          <div className="bg-[#0B261C] text-stone-200 text-xs font-bold px-4 py-2.5 border-t border-[#D4AF37]/40 flex items-center justify-between gap-2">
+            <span>💡 Ketuk gambar langsung atau tombol (+) untuk memperbesar tulisan</span>
+            <button
+              type="button"
+              onClick={() => setBrochureZoomLevel(1)}
+              className="tactile-btn text-[#D4AF37] underline font-black text-xs flex-shrink-0"
+            >
+              Reset 100%
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ================================================================= */}

@@ -177,7 +177,7 @@
     },
     "SpaSettings": {
       "title": "SpaSettings",
-      "description": "Global operational settings including time slots, holidays, and admin profile",
+      "description": "Global operational settings including time slots, holidays, point rewards catalog, and admin profile",
       "type": "object",
       "properties": {
         "updatedAt": {

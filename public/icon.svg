@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0f3d2e" />
+  <rect x="28" y="28" width="456" height="456" rx="92" fill="none" stroke="#D4AF37" stroke-width="8" stroke-opacity="0.6" />
+  <circle cx="256" cy="215" r="105" fill="#D4AF37" fill-opacity="0.12" stroke="#D4AF37" stroke-width="6" />
+  <path d="M256 125 C220 165, 195 205, 256 265 C317 205, 292 165, 256 125 Z" fill="#D4AF37" />
+  <path d="M256 165 C205 185, 175 225, 225 268 C240 245, 248 220, 256 165 Z" fill="#D4AF37" fill-opacity="0.8" />
+  <path d="M256 165 C307 185, 337 225, 287 268 C272 245, 264 220, 256 165 Z" fill="#D4AF37" fill-opacity="0.8" />
+  <text x="256" y="380" font-family="Georgia, serif" font-size="56" font-weight="bold" fill="#D4AF37" text-anchor="middle" letter-spacing="4">GRIYA AYU</text>
+  <text x="256" y="425" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#F5F5F0" fill-opacity="0.9" text-anchor="middle" letter-spacing="3">SPORT MASSAGE &amp; SPA</text>
+</svg>

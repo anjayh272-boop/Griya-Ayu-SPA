@@ -12,12 +12,14 @@ import {
   AppNotification,
   PaymentMethodType,
   RefundRequestInfo,
+  PointReward,
 } from './types/index.ts';
 import {
   INITIAL_USERS,
   INITIAL_BOOKINGS,
   INITIAL_TIME_SLOTS,
   INITIAL_NOTIFICATIONS,
+  POINT_REWARDS,
 } from './data/mockData.ts';
 import {
   applyPointsCompletion,
@@ -56,6 +58,7 @@ import { ReceiptModal } from './components/ReceiptModal.tsx';
 import { AuthScreen } from './components/AuthScreen.tsx';
 import { CustomerDashboard } from './components/CustomerDashboard.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
+import { PWAInstallBanner } from './components/PWAInstallBanner.tsx';
 
 export default function App() {
   // Language State ('id' | 'en')
@@ -108,6 +111,10 @@ export default function App() {
 
   const [masterTimeSlots, setMasterTimeSlots] = useState<TimeSlot[]>(() =>
     safeLoadJson<TimeSlot[]>(STORAGE_KEYS.SLOTS, INITIAL_TIME_SLOTS)
+  );
+
+  const [pointRewards, setPointRewards] = useState<PointReward[]>(() =>
+    safeLoadJson<PointReward[]>(STORAGE_KEYS.POINT_REWARDS, POINT_REWARDS)
   );
 
   const [closedWeekdays, setClosedWeekdays] = useState<number[]>(() =>
@@ -284,6 +291,10 @@ export default function App() {
           setClosedSpecificDates(settings.closedSpecificDates);
           safeSaveJson(STORAGE_KEYS.CLOSED_DATES, settings.closedSpecificDates);
         }
+        if (Array.isArray(settings.pointRewards)) {
+          setPointRewards(settings.pointRewards);
+          safeSaveJson(STORAGE_KEYS.POINT_REWARDS, settings.pointRewards);
+        }
         if (settings.adminProfile) {
           const normalizedAdmin: User =
             settings.adminProfile.phone === '085183110392'
@@ -331,6 +342,10 @@ export default function App() {
   useEffect(() => {
     safeSaveJson(STORAGE_KEYS.SLOTS, masterTimeSlots);
   }, [masterTimeSlots]);
+
+  useEffect(() => {
+    safeSaveJson(STORAGE_KEYS.POINT_REWARDS, pointRewards);
+  }, [pointRewards]);
 
   useEffect(() => {
     safeSaveJson(STORAGE_KEYS.CLOSED_WEEKDAYS, closedWeekdays);
@@ -1403,6 +1418,96 @@ export default function App() {
     showToast('Jam Ditambahkan', `Slot jam ${slotTime} berhasil ditambahkan.`);
   };
 
+  // Kelola Katalog Penukaran Poin oleh Admin (Tambah / Edit / Hapus / Status)
+  const handleUpdatePointRewards = (nextRewards: PointReward[]) => {
+    setPointRewards(nextRewards);
+    safeSaveJson(STORAGE_KEYS.POINT_REWARDS, nextRewards);
+    void syncSpaSettingsToCloud({ pointRewards: nextRewards });
+  };
+
+  // Penukaran Poin Langsung oleh Pelanggan di Halaman Poin
+  const handleRedeemPointReward = (reward: PointReward) => {
+    if (!currentUser) return;
+    const rewardTitle = reward.title || reward.label;
+    if (reward.available === false) {
+      showToast(
+        'Reward Tidak Tersedia',
+        `Mohon maaf, reward "${rewardTitle}" saat ini sedang tidak tersedia.`
+      );
+      return;
+    }
+    if (currentUser.points < reward.cost) {
+      showToast(
+        'Poin Belum Mencukupi',
+        `Poin Anda saat ini ${currentUser.points} Poin. Dibutuhkan ${reward.cost} Poin untuk menukarkan "${rewardTitle}".`
+      );
+      return;
+    }
+
+    const nextPoints = Math.max(0, currentUser.points - reward.cost);
+    const updatedUser: User = {
+      ...currentUser,
+      points: nextPoints,
+    };
+
+    setCurrentUser(updatedUser);
+    saveActiveSession(updatedUser, isAdmin);
+    void syncCustomerToCloud(updatedUser);
+
+    setCustomers((prev) => {
+      const next = prev.map((u) =>
+        normalizePhoneDigits(u.phone) === normalizePhoneDigits(currentUser.phone)
+          ? { ...u, points: nextPoints }
+          : u
+      );
+      saveCustomersPersistently(next);
+      return next;
+    });
+
+    const timestampStr = nowFormatted();
+    const waRedeemText =
+      `Halo Admin Griya Ayu, saya *${currentUser.name}* (${currentUser.phone}) telah menukarkan *${reward.cost} Poin Loyalitas* di aplikasi:\n\n` +
+      `🎁 *Reward Ditukar:* ${rewardTitle}\n` +
+      `📝 *Keterangan:* ${reward.description || '-'}\n` +
+      `👑 *Sisa Poin Saya:* ${nextPoints} Poin\n` +
+      `🕒 *Waktu Penukaran:* ${timestampStr}\n\n` +
+      `Mohon dicatat untuk klaim reward saya ya Admin. Terima kasih!`;
+    const waRedeemUrl = `https://wa.me/6287765573476?text=${encodeURIComponent(waRedeemText)}`;
+
+    const adminNotif: AppNotification = {
+      id: Date.now(),
+      target: 'admin',
+      type: 'points_reward',
+      title: `🎁 Penukaran ${reward.cost} Poin — ${currentUser.name}`,
+      message: `Pelanggan ${currentUser.name} (${currentUser.phone}) berhasil menukarkan ${reward.cost} Poin dengan reward "${rewardTitle}". Sisa poin pelanggan kini: ${nextPoints} Poin.`,
+      createdAt: timestampStr,
+      read: false,
+      customerName: currentUser.name,
+      customerWa: currentUser.phone,
+    };
+
+    const customerNotif: AppNotification = {
+      id: Date.now() + 1,
+      target: 'customer',
+      targetPhone: currentUser.phone,
+      type: 'points_reward',
+      title: `🎉 Berhasil Tukar ${reward.cost} Poin: ${rewardTitle}`,
+      message: `Selamat! Anda telah menukarkan ${reward.cost} Poin untuk "${rewardTitle}". Catatan: ${
+        reward.description || 'Tunjukkan bukti notifikasi ini kepada Admin Griya Ayu saat kunjungan.'
+      } Sisa saldo poin Anda: ${nextPoints} Poin.`,
+      createdAt: timestampStr,
+      read: false,
+    };
+
+    addNotificationsAndSync([adminNotif, customerNotif]);
+    triggerCelebration(`🎁 Tukar ${reward.cost} Poin!`);
+    showToast(
+      'Penukaran Poin Berhasil! 🎁',
+      `Anda berhasil menukarkan ${reward.cost} Poin untuk "${rewardTitle}". Sisa saldo poin Anda sekarang: ${nextPoints} Poin. Bukti penukaran juga tercatat di Bar Notifikasi.`,
+      waRedeemUrl
+    );
+  };
+
   const activePaymentOrder = bookings.find((b) => b.id === activePaymentOrderId) || null;
   const activeReceiptOrder = bookings.find((b) => b.id === receiptOrderId) || null;
 
@@ -1421,6 +1526,9 @@ export default function App() {
           pointsText={celebration.pointsText}
           confettiActive={celebration.confettiActive}
         />
+
+        {/* BANNER INSTALASI PWA KE LAYAR UTAMA HP */}
+        <PWAInstallBanner />
 
         {/* =============================================================== */}
         {/* TAMPILAN AWAL: LOGIN & DAFTAR AKUN                              */}
@@ -1444,6 +1552,7 @@ export default function App() {
             bookings={bookings}
             notifications={notifications}
             masterTimeSlots={masterTimeSlots}
+            pointRewards={pointRewards}
             closedWeekdays={closedWeekdays}
             closedSpecificDates={closedSpecificDates}
             language={language}
@@ -1452,6 +1561,7 @@ export default function App() {
             onOpenPaymentModal={handleOpenPaymentModal}
             onConfirmWizardBooking={handleConfirmWizardBooking}
             onRequestRefund={handleRequestRefund}
+            onRedeemPointReward={handleRedeemPointReward}
             onCopyText={handleCopyText}
             onViewReceipt={(order) => setReceiptOrderId(order.id)}
             onMarkNotificationsRead={handleMarkCustomerNotificationsRead}
@@ -1470,12 +1580,14 @@ export default function App() {
             bookings={bookings}
             notifications={notifications}
             masterTimeSlots={masterTimeSlots}
+            pointRewards={pointRewards}
             closedWeekdays={closedWeekdays}
             closedSpecificDates={closedSpecificDates}
             language={language}
             onChangeLanguage={setLanguage}
             onUpdateUser={handleUpdateUser}
             onUpdateCustomerAccount={handleUpdateCustomerAccount}
+            onUpdatePointRewards={handleUpdatePointRewards}
             onVerifyPayment={handleVerifyPayment}
             onCompleteTreatment={handleCompleteTreatment}
             onApproveRefund={handleApproveRefund}

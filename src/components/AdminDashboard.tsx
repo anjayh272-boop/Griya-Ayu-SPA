@@ -5,6 +5,7 @@ import {
   TimeSlot,
   Language,
   AppNotification,
+  PointReward,
 } from '../types/index.ts';
 import {
   formatRupiah,
@@ -22,7 +23,7 @@ import {
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
 } from '../utils/spaLogic.ts';
-import { PROMO_TEMPLATES, INITIAL_USERS } from '../data/mockData.ts';
+import { PROMO_TEMPLATES, INITIAL_USERS, POINT_REWARDS } from '../data/mockData.ts';
 import { AccountPanel } from './AccountPanel.tsx';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
@@ -32,12 +33,14 @@ interface AdminDashboardProps {
   bookings: BookingOrder[];
   notifications: AppNotification[];
   masterTimeSlots: TimeSlot[];
+  pointRewards?: PointReward[];
   closedWeekdays: number[];
   closedSpecificDates: string[];
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
   onUpdateCustomerAccount?: (updated: User) => void;
+  onUpdatePointRewards?: (nextRewards: PointReward[]) => void;
   onVerifyPayment: (orderId: number) => void;
   onCompleteTreatment: (orderId: number) => void;
   onApproveRefund: (orderId: number) => void;
@@ -66,12 +69,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   bookings,
   notifications,
   masterTimeSlots,
+  pointRewards,
   closedWeekdays,
   closedSpecificDates,
   language,
   onChangeLanguage,
   onUpdateUser,
   onUpdateCustomerAccount,
+  onUpdatePointRewards,
   onVerifyPayment,
   onCompleteTreatment,
   onApproveRefund,
@@ -90,7 +95,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const isEn = language === 'en';
   const [adminSubTab, setAdminSubTab] = useState<
-    'orders' | 'notifications' | 'schedule' | 'account'
+    'orders' | 'notifications' | 'rewards' | 'schedule' | 'account'
   >('orders');
   const [orderFilter, setOrderFilter] = useState<
     'new_incoming' | 'all' | 'refund_pending' | 'active' | 'refund_done'
@@ -272,6 +277,186 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         promoCode: promoCode.trim() || 'GRIYA-PROMO',
       });
     }, storedCustomers.length * 350 + 200);
+  };
+
+  // =========================================================================
+  // STATE & HANDLER KELOLA PENUKARAN POIN (TAMBAH / EDIT / HAPUS REWARD)
+  // =========================================================================
+  const allRewardsSource =
+    pointRewards && pointRewards.length > 0 ? pointRewards : POINT_REWARDS;
+  const managedRewards = React.useMemo(
+    () =>
+      allRewardsSource
+        .filter((r) => r.id !== 'none')
+        .sort((a, b) => a.cost - b.cost),
+    [allRewardsSource]
+  );
+
+  const [rewardModalOpen, setRewardModalOpen] = useState<boolean>(false);
+  const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
+  const [rewardTitleInput, setRewardTitleInput] = useState<string>('');
+  const [rewardCostInput, setRewardCostInput] = useState<string>('50');
+  const [rewardDescInput, setRewardDescInput] = useState<string>('');
+  const [rewardStockInput, setRewardStockInput] = useState<string>('Tersedia');
+  const [rewardAvailableInput, setRewardAvailableInput] = useState<boolean>(true);
+  const [rewardFormError, setRewardFormError] = useState<string>('');
+  const [deletingRewardId, setDeletingRewardId] = useState<string | null>(null);
+
+  const handleOpenAddRewardModal = () => {
+    setEditingRewardId(null);
+    setRewardTitleInput('');
+    setRewardCostInput('50');
+    setRewardDescInput('');
+    setRewardStockInput('Tersedia');
+    setRewardAvailableInput(true);
+    setRewardFormError('');
+    setRewardModalOpen(true);
+  };
+
+  const handleOpenEditRewardModal = (item: PointReward) => {
+    setEditingRewardId(item.id);
+    setRewardTitleInput(item.title || item.label);
+    setRewardCostInput(String(item.cost));
+    setRewardDescInput(item.description || '');
+    setRewardStockInput(item.stockInfo || 'Tersedia');
+    setRewardAvailableInput(item.available !== false);
+    setRewardFormError('');
+    setRewardModalOpen(true);
+  };
+
+  const handleSaveRewardForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanTitle = rewardTitleInput.trim();
+    const parsedCost = Math.floor(Number(rewardCostInput));
+    const cleanDesc = rewardDescInput.trim();
+    const cleanStock = rewardStockInput.trim() || (rewardAvailableInput ? 'Tersedia' : 'Stok Habis');
+
+    if (!cleanTitle) {
+      setRewardFormError('Mohon isi Nama Reward / Hadiah terlebih dahulu.');
+      return;
+    }
+    if (!Number.isFinite(parsedCost) || parsedCost <= 0) {
+      setRewardFormError('Jumlah Poin yang dibutuhkan harus berupa angka lebih dari 0.');
+      return;
+    }
+
+    const noneOption: PointReward =
+      allRewardsSource.find((r) => r.id === 'none') || {
+        id: 'none',
+        title: 'Simpan Poin (Tabung Poin Loyalitas)',
+        label: 'Simpan Poin (Tabung Poin Loyalitas)',
+        cost: 0,
+        cut: 0,
+        available: true,
+        stockInfo: 'Tersedia',
+      };
+
+    if (editingRewardId) {
+      const updatedItem: PointReward = {
+        id: editingRewardId,
+        title: cleanTitle,
+        label: cleanTitle,
+        cost: parsedCost,
+        cut: 0,
+        description: cleanDesc || 'Syarat & ketentuan sesuai kebijakan Griya Ayu.',
+        available: rewardAvailableInput,
+        stockInfo: cleanStock,
+      };
+      const nextList = [
+        noneOption,
+        ...managedRewards.map((r) => (r.id === editingRewardId ? updatedItem : r)),
+      ];
+      if (onUpdatePointRewards) {
+        onUpdatePointRewards(nextList);
+      }
+      setRewardModalOpen(false);
+      onShowToast(
+        'Reward Berhasil Diperbarui! ✨',
+        `Perubahan pada reward "${cleanTitle}" (${parsedCost} Poin) telah disimpan dan langsung terbarui di halaman Poin pelanggan.`
+      );
+    } else {
+      const newItem: PointReward = {
+        id: `reward_${Date.now()}`,
+        title: cleanTitle,
+        label: cleanTitle,
+        cost: parsedCost,
+        cut: 0,
+        description: cleanDesc || 'Syarat & ketentuan sesuai kebijakan Griya Ayu.',
+        available: rewardAvailableInput,
+        stockInfo: cleanStock,
+      };
+      const nextList = [noneOption, ...managedRewards, newItem];
+      if (onUpdatePointRewards) {
+        onUpdatePointRewards(nextList);
+      }
+      setRewardModalOpen(false);
+      onShowToast(
+        'Reward Baru Ditambahkan! 🎁',
+        `Reward "${cleanTitle}" (${parsedCost} Poin) berhasil ditambahkan ke katalog penukaran poin pelanggan.`
+      );
+    }
+  };
+
+  const handleToggleRewardAvailability = (item: PointReward) => {
+    const nextAvailable = item.available === false ? true : false;
+    const noneOption: PointReward =
+      allRewardsSource.find((r) => r.id === 'none') || {
+        id: 'none',
+        title: 'Simpan Poin (Tabung Poin Loyalitas)',
+        label: 'Simpan Poin (Tabung Poin Loyalitas)',
+        cost: 0,
+        cut: 0,
+        available: true,
+      };
+    const nextList = [
+      noneOption,
+      ...managedRewards.map((r) =>
+        r.id === item.id
+          ? {
+              ...r,
+              available: nextAvailable,
+              stockInfo: nextAvailable
+                ? r.stockInfo === 'Nonaktif / Habis'
+                  ? 'Tersedia'
+                  : r.stockInfo || 'Tersedia'
+                : 'Nonaktif / Habis',
+            }
+          : r
+      ),
+    ];
+    if (onUpdatePointRewards) {
+      onUpdatePointRewards(nextList);
+    }
+    onShowToast(
+      nextAvailable ? 'Reward Diaktifkan Kembali ✓' : 'Reward Dinonaktifkan Sementara',
+      nextAvailable
+        ? `Reward "${item.title || item.label}" kini aktif dan tampil kembali di katalog poin pelanggan.`
+        : `Reward "${item.title || item.label}" dinonaktifkan dan otomatis disembunyikan dari katalog poin pelanggan.`
+    );
+  };
+
+  const handleConfirmDeleteReward = (item: PointReward) => {
+    const noneOption: PointReward =
+      allRewardsSource.find((r) => r.id === 'none') || {
+        id: 'none',
+        title: 'Simpan Poin (Tabung Poin Loyalitas)',
+        label: 'Simpan Poin (Tabung Poin Loyalitas)',
+        cost: 0,
+        cut: 0,
+        available: true,
+      };
+    const nextList = [
+      noneOption,
+      ...managedRewards.filter((r) => r.id !== item.id),
+    ];
+    if (onUpdatePointRewards) {
+      onUpdatePointRewards(nextList);
+    }
+    setDeletingRewardId(null);
+    onShowToast(
+      'Reward Berhasil Dihapus 🗑️',
+      `Item reward "${item.title || item.label}" (${item.cost} Poin) telah dihapus dari katalog penukaran poin.`
+    );
   };
 
   return (
@@ -1622,12 +1807,372 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             />
           </div>
         )}
+
+        {/* =============================================================== */}
+        {/* SUB-TAB BARU: KELOLA PENUKARAN POIN (MANAJEMEN REWARD POIN)     */}
+        {/* =============================================================== */}
+        {adminSubTab === 'rewards' && (
+          <div className="space-y-4 animate-page-enter">
+            {/* Kartu Header & Ringkasan Katalog Reward */}
+            <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-sm space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-amber-700 block">
+                    Manajemen Loyalitas Member
+                  </span>
+                  <h2 className="text-base sm:text-lg font-black text-[#0B261C] flex items-center gap-2 mt-0.5">
+                    <i className="fa-solid fa-gift text-amber-500"></i>
+                    <span>Kelola Penukaran Poin</span>
+                  </h2>
+                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed mt-1">
+                    Tambah, ubah, atau hapus hadiah penukaran poin. Setiap perubahan otomatis
+                    tersinkronisasi langsung ke halaman <b>Poin</b> di akun pelanggan.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOpenAddRewardModal}
+                  className="tactile-btn gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-2xl text-xs sm:text-sm border border-amber-300 shadow-md flex items-center justify-center gap-2 flex-shrink-0"
+                >
+                  <i className="fa-solid fa-plus-circle text-sm"></i>
+                  <span>Tambah Reward Baru</span>
+                </button>
+              </div>
+
+              {/* Statistik Singkat Reward */}
+              <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+                <div className="bg-stone-50 border border-stone-200 rounded-xl p-2.5">
+                  <span className="text-[11px] font-bold text-stone-500 block">Total Item</span>
+                  <span className="text-base font-black text-[#0B261C]">
+                    {managedRewards.length}
+                  </span>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                  <span className="text-[11px] font-bold text-emerald-800 block">
+                    Aktif di Pelanggan
+                  </span>
+                  <span className="text-base font-black text-emerald-900">
+                    {managedRewards.filter((r) => r.available !== false).length}
+                  </span>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+                  <span className="text-[11px] font-bold text-amber-800 block">
+                    Nonaktif / Habis
+                  </span>
+                  <span className="text-base font-black text-amber-900">
+                    {managedRewards.filter((r) => r.available === false).length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Daftar Item Reward Poin */}
+            <div className="space-y-3">
+              {managedRewards.length === 0 ? (
+                <div className="bg-white p-6 rounded-2xl border border-stone-200 text-center space-y-3">
+                  <i className="fa-solid fa-gift text-3xl text-stone-400"></i>
+                  <div>
+                    <p className="text-sm font-black text-stone-800">
+                      Belum Ada Katalog Reward Poin
+                    </p>
+                    <p className="text-xs text-stone-500 mt-1">
+                      Klik tombol &ldquo;Tambah Reward Baru&rdquo; di atas untuk membuat hadiah
+                      penukaran poin bagi pelanggan.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddRewardModal}
+                    className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black text-xs px-4 py-2.5 rounded-xl border border-[#D4AF37]"
+                  >
+                    + Tambah Reward Pertama
+                  </button>
+                </div>
+              ) : (
+                managedRewards.map((item, idx) => {
+                  const isAvailable = item.available !== false;
+                  const isDeletingThis = deletingRewardId === item.id;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-4 rounded-2xl border-2 transition space-y-3 shadow-xs ${
+                        isAvailable
+                          ? 'bg-white border-stone-200/90'
+                          : 'bg-stone-100 border-stone-300 opacity-85'
+                      }`}
+                    >
+                      {/* Baris Atas: Urutan + Status Ketersediaan/Stok & Nominal Poin */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-stone-500">
+                            #{idx + 1}
+                          </span>
+                          <span
+                            className={`text-xs font-extrabold px-2.5 py-1 rounded-lg border ${
+                              isAvailable
+                                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                : 'bg-stone-200 text-stone-700 border-stone-300'
+                            }`}
+                          >
+                            {isAvailable
+                              ? `✓ Aktif · ${item.stockInfo || 'Tersedia'}`
+                              : `✕ Nonaktif · ${item.stockInfo || 'Habis'}`}
+                          </span>
+                        </div>
+
+                        <span className="bg-[#0B261C] text-[#D4AF37] text-xs sm:text-sm font-black px-3 py-1 rounded-xl border border-[#D4AF37]">
+                          👑 {item.cost} Poin
+                        </span>
+                      </div>
+
+                      {/* Nama Reward & Catatan/Deskripsi */}
+                      <div className="space-y-1.5">
+                        <h3 className="text-sm sm:text-base font-black text-[#0B261C] leading-snug">
+                          {item.title || item.label}
+                        </h3>
+                        <div className="bg-stone-50 border border-stone-200 rounded-xl p-2.5 text-xs sm:text-sm text-stone-700 leading-relaxed">
+                          <span className="text-[11px] font-extrabold uppercase text-stone-500 block mb-0.5">
+                            Catatan / Deskripsi &amp; Syarat:
+                          </span>
+                          <p className="whitespace-pre-line">
+                            {item.description || 'Tidak ada catatan tambahan.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Konfirmasi Hapus Inline (Jika Klik Hapus) */}
+                      {isDeletingThis ? (
+                        <div className="bg-red-50 border-2 border-red-300 rounded-xl p-3 space-y-2 animate-fade">
+                          <p className="text-xs font-black text-red-900">
+                            Yakin ingin menghapus reward &ldquo;{item.title || item.label}&rdquo; ({item.cost} Poin)? Item ini akan langsung hilang dari katalog pelanggan.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleConfirmDeleteReward(item)}
+                              className="tactile-btn flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                            >
+                              <i className="fa-solid fa-trash-can"></i>
+                              <span>Ya, Hapus Permanen</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingRewardId(null)}
+                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-2 px-3 rounded-xl text-xs"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Baris Tombol Aksi Admin: Edit, Toggle Status, Hapus */
+                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-stone-200/80">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditRewardModal(item)}
+                            className="tactile-btn flex-1 bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-2.5 px-3 rounded-xl text-xs border border-[#D4AF37]/50 flex items-center justify-center gap-1.5"
+                          >
+                            <i className="fa-solid fa-pen-to-square"></i>
+                            <span>Edit Reward</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRewardAvailability(item)}
+                            className={`tactile-btn py-2.5 px-3 rounded-xl text-xs font-black border flex items-center justify-center gap-1.5 ${
+                              isAvailable
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
+                            }`}
+                          >
+                            <i
+                              className={
+                                isAvailable ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'
+                              }
+                            ></i>
+                            <span>{isAvailable ? 'Nonaktifkan' : 'Aktifkan'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setDeletingRewardId(item.id)}
+                            className="tactile-btn bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* BOTTOM NAVIGATION KHUSUS ADMIN (4 MENU ADMIN - RAPI & TIDAK TABRAKAN) */}
+      {/* ================================================================= */}
+      {/* MODAL FORM TAMBAH / EDIT REWARD POIN (KHUSUS ADMIN)               */}
+      {/* ================================================================= */}
+      {rewardModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-page-enter"
+          role="dialog"
+          aria-modal="true"
+          aria-label={editingRewardId ? 'Edit Reward Poin' : 'Tambah Reward Poin Baru'}
+        >
+          <div className="bg-white w-full max-w-md rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            {/* Header Modal */}
+            <div className="bg-[#0B261C] text-white px-4 py-3.5 border-b border-[#D4AF37]/50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <i className="fa-solid fa-gift text-[#D4AF37] text-base"></i>
+                <h3 className="text-sm sm:text-base font-black text-[#D4AF37]">
+                  {editingRewardId ? 'Edit Reward Penukaran Poin' : 'Tambah Reward Poin Baru'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRewardModalOpen(false)}
+                className="text-stone-300 hover:text-white text-xs font-bold px-2.5 py-1 rounded-lg"
+              >
+                ✕ Tutup
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form
+              onSubmit={handleSaveRewardForm}
+              className="p-4 space-y-3.5 overflow-y-auto text-xs sm:text-sm"
+            >
+              <div>
+                <label className="block font-black text-[#0B261C] mb-1">
+                  Nama Reward / Hadiah <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={rewardTitleInput}
+                  onChange={(e) => {
+                    setRewardTitleInput(e.target.value);
+                    setRewardFormError('');
+                  }}
+                  placeholder="Contoh: Gratis Bekam / Diskon 20k / Gratis Totok Wajah"
+                  className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2.5 font-bold text-stone-900 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black text-[#0B261C] mb-1">
+                    Jumlah Poin Dibutuhkan <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={rewardCostInput}
+                    onChange={(e) => {
+                      setRewardCostInput(e.target.value);
+                      setRewardFormError('');
+                    }}
+                    placeholder="Contoh: 50"
+                    className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2.5 font-black text-[#0B261C] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black text-[#0B261C] mb-1">
+                    Keterangan Stok / Kuota
+                  </label>
+                  <input
+                    type="text"
+                    value={rewardStockInput}
+                    onChange={(e) => setRewardStockInput(e.target.value)}
+                    placeholder="Contoh: Tersedia / Stok 10"
+                    className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2.5 font-bold text-stone-800 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-black text-[#0B261C] mb-1">
+                  Catatan / Deskripsi Bebas (Syarat &amp; Ketentuan)
+                </label>
+                <textarea
+                  rows={3}
+                  value={rewardDescInput}
+                  onChange={(e) => setRewardDescInput(e.target.value)}
+                  placeholder="Contoh: Diskon 20k untuk semua treatment, Gratis Bekam 45 menit, atau Syarat & Ketentuan bebas diisi admin..."
+                  className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl p-3 font-medium text-stone-800 focus:outline-none leading-relaxed"
+                />
+              </div>
+
+              <div>
+                <span className="block font-black text-[#0B261C] mb-1.5">
+                  Status Ketersediaan di Katalog Pelanggan:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRewardAvailableInput(true)}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      rewardAvailableInput
+                        ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <i className="fa-solid fa-circle-check"></i>
+                    <span>Aktif / Tersedia</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRewardAvailableInput(false)}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      !rewardAvailableInput
+                        ? 'bg-stone-800 text-amber-300 border-stone-900 shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <i className="fa-solid fa-eye-slash"></i>
+                    <span>Nonaktif / Habis</span>
+                  </button>
+                </div>
+              </div>
+
+              {rewardFormError && (
+                <div className="bg-red-50 border border-red-300 text-red-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-triangle-exclamation text-red-600"></i>
+                  <span>{rewardFormError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRewardModalOpen(false)}
+                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-3 px-4 rounded-2xl text-xs sm:text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-2xl text-xs sm:text-sm border border-amber-300 shadow-md flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-floppy-disk"></i>
+                  <span>{editingRewardId ? 'Simpan Perubahan' : 'Simpan Reward Baru'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM NAVIGATION KHUSUS ADMIN (5 MENU ADMIN - RAPI & TIDAK TABRAKAN) */}
       <nav
         aria-label="Navigasi Admin"
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-stone-900 text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-4 gap-0.5 py-1.5 px-1.5 text-[10px] font-bold z-40 shadow-2xl"
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-stone-900 text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-5 gap-0.5 py-1.5 px-1 text-[10px] font-bold z-40 shadow-2xl"
       >
         <button
           type="button"
@@ -1641,7 +2186,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <i className="fa-solid fa-clipboard-check text-sm"></i>
           <span className="leading-none truncate max-w-full">{isEn ? 'Orders' : 'Pesanan'}</span>
           {paidUnverifiedCount > 0 && (
-            <span className="absolute top-0.5 right-2 bg-emerald-500 text-stone-950 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+            <span className="absolute top-0.5 right-1.5 bg-emerald-500 text-stone-950 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
               {paidUnverifiedCount}
             </span>
           )}
@@ -1656,12 +2201,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <i className="fa-solid fa-bullhorn text-sm"></i>
-          <span className="leading-none truncate max-w-full">Notif & Bot</span>
+          <span className="leading-none truncate max-w-full">Notif &amp; Bot</span>
           {unreadAdminNotifs > 0 && (
-            <span className="absolute top-0.5 right-2 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+            <span className="absolute top-0.5 right-1.5 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
               {unreadAdminNotifs}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminSubTab('rewards')}
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1.5 px-0.5 rounded-xl min-w-0 transition ${
+            adminSubTab === 'rewards'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
+              : 'text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <i className="fa-solid fa-gift text-sm"></i>
+          <span className="leading-none truncate max-w-full">
+            {isEn ? 'Rewards' : 'Kelola Poin'}
+          </span>
         </button>
         <button
           type="button"

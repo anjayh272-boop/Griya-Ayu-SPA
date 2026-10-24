@@ -33,9 +33,13 @@ export interface ServiceItem {
 
 export interface PointReward {
   id: string;
+  title?: string;
   label: string;
   cost: number;
   cut: number;
+  description?: string;
+  available?: boolean;
+  stockInfo?: string;
 }
 
 export type PaymentMethodType =

@@ -489,16 +489,29 @@ export function calculateOrderPricing(
     }
   }
 
-  const foundReward = pointRewards.find((r) => r.id === chosenRewardId);
+  const fallbackNoneReward: PointReward = {
+    id: 'none',
+    title: 'Simpan Poin (Tabung Poin Loyalitas)',
+    label: 'Simpan Poin (Tabung Poin Loyalitas)',
+    cost: 0,
+    cut: 0,
+    available: true,
+  };
+  const foundReward =
+    chosenRewardId && chosenRewardId !== 'none'
+      ? pointRewards.find((r) => r.id === chosenRewardId && r.available !== false)
+      : undefined;
   const rewardObj =
-    foundReward && customerPoints >= foundReward.cost ? foundReward : pointRewards[0];
+    foundReward && customerPoints >= foundReward.cost
+      ? foundReward
+      : pointRewards.find((r) => r.id === 'none') || fallbackNoneReward;
 
   // Poin tidak digunakan untuk potongan harga (discountAmount = 0), melainkan bonus Micro-Rewards
   const discountAmount = 0;
   const finalPrice = subtotal;
 
   if (rewardObj && rewardObj.cost > 0) {
-    titles.push(`[Bonus Tukar ${rewardObj.cost} Poin: ${rewardObj.label}]`);
+    titles.push(`[Bonus Tukar ${rewardObj.cost} Poin: ${rewardObj.title || rewardObj.label}]`);
   }
 
   return {
@@ -726,6 +739,7 @@ export const STORAGE_KEYS = {
   OMZET_LEDGER: 'griya_ayu_omzet_ledger_live',
   NOTIFICATIONS: 'griya_ayu_notifications_live',
   SLOTS: 'griya_ayu_slots_live',
+  POINT_REWARDS: 'griya_ayu_point_rewards_live',
   CLOSED_WEEKDAYS: 'griya_ayu_closed_weekdays_live',
   CLOSED_DATES: 'griya_ayu_closed_dates_live',
   ADMIN_PROFILE: 'griya_ayu_admin_profile',
