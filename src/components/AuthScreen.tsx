@@ -100,13 +100,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsSendingOtp(true);
 
     try {
-      // 3. Panggil API Route Proxy /api/send-otp (sisi server) agar tidak terkena Mixed Content HTTPS -> HTTP
-      const response = await fetch('/api/send-otp', {
+      // 3. Panggil Vercel Rewrites Proxy /api/vps/send-message agar tidak terkena Mixed Content Block / CORS
+      const response = await fetch('/api/vps/send-message', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           target: nomorWhatsApp,
-          message: `Halo! Kode OTP Masuk Griya Ayu Anda adalah: ${otpCode}. Jangan bagikan kode ini kepada siapa pun.`,
+          message: `Halo! Kode OTP Griya Ayu Anda adalah: ${otpCode}. Berlaku 5 menit. Jangan bagikan kode ini kepada siapa pun.`,
         }),
       });
 

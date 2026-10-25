@@ -91,6 +91,7 @@ async function startServer() {
   };
 
   // Endpoint proxy untuk kirim OTP & notifikasi WhatsApp ke VPS Gateway
+  app.post('/api/vps/send-message', handleWhatsAppProxy);
   app.post('/api/send-otp', handleWhatsAppProxy);
   app.post('/api/send-message', handleWhatsAppProxy);
 

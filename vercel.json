@@ -1,12 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
-    },
-    {
-      "source": "/((?!api/|assets/|icons/|manifest\\.json|sw\\.js|icon\\.svg|.*\\.png).*)",
-      "destination": "/index.html"
+      "source": "/api/vps/:path*",
+      "destination": "http://104.234.26.109:2219/api/:path*"
     }
   ]
 }
