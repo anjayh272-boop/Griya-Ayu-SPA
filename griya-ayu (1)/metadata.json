@@ -1,0 +1,6 @@
+{
+  "name": "Griya Ayu Sport Massage & Spa",
+  "description": "Aplikasi Booking Mobile & Manajemen Jadwal Griya Ayu Sport Massage & Spa bersertifikasi AIFMO-P Ibu Kartini dengan sistem loyalitas poin dan pemisahan akun pelanggan dan admin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
