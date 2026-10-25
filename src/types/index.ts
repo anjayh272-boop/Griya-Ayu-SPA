@@ -29,6 +29,8 @@ export interface ServiceItem {
   gender?: 'all' | 'male' | 'female';
   genderBadge?: string;
   gridCategories?: ServiceGridCategory[];
+  available?: boolean;
+  hasInjurySpots?: boolean;
 }
 
 export interface PointReward {
@@ -97,8 +99,10 @@ export interface BookingOrder {
     | 'Refund_Requested'
     | 'Refund_Completed';
   createdAt: string;
+  therapist?: string;
   verifiedDateIso?: string;
   paymentProofImage?: string;
+  paymentChannel?: string;
   refundRequest?: RefundRequestInfo;
   refundRejectedReason?: string;
 }

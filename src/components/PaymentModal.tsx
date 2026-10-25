@@ -10,6 +10,8 @@ import {
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_BANK_ACCOUNTS,
   GRIYA_AYU_ADDRESS,
+  QRIS_PAYMENT_CHANNELS,
+  BANK_TRANSFER_CHANNELS,
 } from '../utils/spaLogic.ts';
 
 interface PaymentModalProps {
@@ -20,7 +22,8 @@ interface PaymentModalProps {
   onPaymentSuccess: (
     orderId: number,
     methodType: PaymentMethodType,
-    paymentProofImage?: string
+    paymentProofImage?: string,
+    paymentChannel?: string
   ) => void;
   onPaymentFailed: (orderId: number, methodType: PaymentMethodType) => void;
   onCopyText: (text: string, label: string) => void;
@@ -36,6 +39,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   onCopyText,
 }) => {
   const [activeMethodType, setActiveMethodType] = useState<PaymentMethodType>('qris');
+  const [selectedChannel, setSelectedChannel] = useState<string>(QRIS_PAYMENT_CHANNELS[0]);
   const [localStatus, setLocalStatus] = useState<'Pending' | 'Locked' | 'Gagal'>('Pending');
   const [remainingMs, setRemainingMs] = useState<number>(20 * 60 * 1000);
   const [proofImage, setProofImage] = useState<string>('');
@@ -45,10 +49,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     if (!order) return;
     if (order.payMethodType === 'qris') {
       setActiveMethodType('qris');
+      setSelectedChannel(order.paymentChannel || QRIS_PAYMENT_CHANNELS[0]);
     } else if (order.payMethodType === 'cash') {
       setActiveMethodType('cash');
+      setSelectedChannel('Cash / Bayar di Tempat');
     } else {
       setActiveMethodType('bank_transfer');
+      setSelectedChannel(order.paymentChannel || BANK_TRANSFER_CHANNELS[0]);
     }
     setProofImage(order.paymentProofImage || '');
     setProofError('');
@@ -80,6 +87,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const handleSelectMethod = (nextType: PaymentMethodType) => {
     setActiveMethodType(nextType);
     setProofError('');
+    setSelectedChannel(
+      nextType === 'qris'
+        ? QRIS_PAYMENT_CHANNELS[0]
+        : nextType === 'bank_transfer'
+        ? BANK_TRANSFER_CHANNELS[0]
+        : 'Cash / Bayar di Tempat'
+    );
     onChangeMethodType(order.id, nextType);
   };
 
@@ -117,7 +131,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       }
     }
     setLocalStatus('Locked');
-    onPaymentSuccess(order.id, activeMethodType, isCashMethod ? undefined : proofImage);
+    onPaymentSuccess(
+      order.id,
+      activeMethodType,
+      isCashMethod ? undefined : proofImage,
+      isCashMethod ? 'Cash / Bayar di Tempat' : selectedChannel
+    );
   };
 
   return (
@@ -352,11 +371,35 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         {/* KOTAK UPLOAD BUKTI TRANSFER / SCREENSHOT QRIS (WAJIB UNTUK QRIS & TRANSFER BANK) */}
         {!isCashMethod && (
           <div className="bg-white p-3.5 rounded-2xl border-2 border-[#D4AF37] space-y-2.5 shadow-xs animate-fade">
-            <div className="flex justify-between items-center">
+            <div className="space-y-1">
+              <label
+                htmlFor="modalPaymentChannelSelect"
+                className="text-[11px] font-black text-[#0B261C] block"
+              >
+                Pembayaran Melalui Aplikasi / Bank Apa:
+              </label>
+              <select
+                id="modalPaymentChannelSelect"
+                value={selectedChannel}
+                onChange={(e) => setSelectedChannel(e.target.value)}
+                className="w-full bg-stone-50 border border-stone-300 text-stone-900 text-xs font-bold p-2 rounded-xl"
+              >
+                {(activeMethodType === 'qris'
+                  ? QRIS_PAYMENT_CHANNELS
+                  : BANK_TRANSFER_CHANNELS
+                ).map((ch) => (
+                  <option key={ch} value={ch}>
+                    {ch}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-between items-center pt-1">
               <span className="text-xs font-black text-[#0B261C] flex items-center gap-1.5">
                 <i className="fa-solid fa-file-arrow-up text-amber-600"></i>
                 <span>
-                  Upload Bukti Transfer / Screenshot QRIS <span className="text-red-600">*</span>
+                  Upload Struk Screenshot Pembayaran <span className="text-red-600">*</span>
                 </span>
               </span>
               <span className="text-[9px] font-black uppercase bg-amber-100 text-amber-900 px-2 py-0.5 rounded">

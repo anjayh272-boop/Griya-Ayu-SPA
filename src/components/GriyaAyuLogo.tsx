@@ -41,7 +41,7 @@ export const GriyaAyuLogo: React.FC<GriyaAyuLogoProps> = ({
     >
       {/* Lingkaran Bulat Sempurna dengan Latar Hijau Gelap (#071A12), Border Emas & Pendaran Cahaya Emas */}
       <div
-        className={`relative ${circleSizeClass} rounded-full bg-[#071A12] border-[#D4AF37] shadow-[0_0_25px_rgba(212,175,55,0.35)] flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
+        className={`relative ${circleSizeClass} aspect-square rounded-full bg-[#071A12] border-[#D4AF37] shadow-[0_0_25px_rgba(212,175,55,0.35)] flex flex-col items-center justify-center overflow-hidden flex-shrink-0`}
       >
         {/* Ring Emas Tipis Dalam */}
         <div className="absolute inset-1 rounded-full border border-[#D4AF37]/35 pointer-events-none" />

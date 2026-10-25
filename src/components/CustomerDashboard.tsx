@@ -9,6 +9,7 @@ import {
   RefundRequestInfo,
   ServiceGridCategory,
   PointReward,
+  ServiceItem,
 } from '../types/index.ts';
 import {
   calculateOrderPricing,
@@ -33,6 +34,8 @@ import {
   GRIYA_AYU_BANK_ACCOUNTS,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
+  QRIS_PAYMENT_CHANNELS,
+  BANK_TRANSFER_CHANNELS,
 } from '../utils/spaLogic.ts';
 import {
   SINGLE_CATALOG,
@@ -49,6 +52,8 @@ interface CustomerDashboardProps {
   notifications: AppNotification[];
   masterTimeSlots: TimeSlot[];
   pointRewards?: PointReward[];
+  singleServices?: ServiceItem[];
+  packageServices?: ServiceItem[];
   closedWeekdays: number[];
   closedSpecificDates: string[];
   language: Language;
@@ -74,6 +79,7 @@ interface CustomerDashboardProps {
     payMethodType: PaymentMethodType;
     markAsPaid: boolean;
     paymentProofImage?: string;
+    paymentChannel?: string;
     existingOrderId?: number | null;
     silentReceipt?: boolean;
   }) => BookingOrder | null;
@@ -92,6 +98,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   notifications,
   masterTimeSlots,
   pointRewards,
+  singleServices,
+  packageServices,
   closedWeekdays,
   closedSpecificDates,
   language,
@@ -111,6 +119,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [customerTab, setCustomerTab] = useState<
     'booking' | 'history' | 'notifications' | 'rewards' | 'account'
   >('booking');
+
+  useEffect(() => {
+    const handleOpenBookingFromNotif = () => {
+      setCustomerTab('history');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    window.addEventListener('griya-open-booking-dashboard', handleOpenBookingFromNotif);
+    return () => {
+      window.removeEventListener('griya-open-booking-dashboard', handleOpenBookingFromNotif);
+    };
+  }, []);
 
   // State Wizard Bertahap (Langkah 1: Pilih Layanan -> Langkah 2: Pilih Tanggal & Jam -> Langkah 3: Pembayaran & Konfirmasi)
   const [bookingStep, setBookingStep] = useState<1 | 2 | 3>(1);
@@ -160,6 +179,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [step3PendingOrderId, setStep3PendingOrderId] = useState<number | null>(null);
   const [step3ExpiresAt, setStep3ExpiresAt] = useState<number>(() => Date.now() + 20 * 60 * 1000);
   const [step3MethodType, setStep3MethodType] = useState<PaymentMethodType>('qris');
+  const [step3PaymentChannel, setStep3PaymentChannel] = useState<string>(
+    QRIS_PAYMENT_CHANNELS[0]
+  );
   const [step3ProofImage, setStep3ProofImage] = useState<string>('');
   const [step3ProofError, setStep3ProofError] = useState<string>('');
 
@@ -369,13 +391,28 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     return [noneOption, ...catalogPointRewards];
   }, [catalogPointRewards]);
 
+  // Katalog layanan Sport Massage & SPA yang dikelola Admin (hanya menampilkan yang aktif)
+  const activeSingleCatalog = React.useMemo(() => {
+    const source =
+      singleServices && singleServices.length > 0 ? singleServices : SINGLE_CATALOG;
+    return source.filter((s) => s.available !== false);
+  }, [singleServices]);
+
+  const activePackageCatalog = React.useMemo(() => {
+    const source =
+      packageServices && Array.isArray(packageServices)
+        ? packageServices
+        : PACKAGE_CATALOG;
+    return source.filter((p) => p.available !== false);
+  }, [packageServices]);
+
   // Pricing calculation
   const pricing = calculateOrderPricing(
     serviceMode,
     chosenSingleIds,
     chosenPackageId,
-    SINGLE_CATALOG,
-    PACKAGE_CATALOG,
+    activeSingleCatalog,
+    activePackageCatalog,
     selectedRewardId,
     activePointRewardsWithNone,
     currentUser.points,
@@ -397,7 +434,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     } else {
       const updated = [...chosenSingleIds, id];
       setChosenSingleIds(updated);
-      if (id === 's2' || id === 's4') {
+      const serviceObj = activeSingleCatalog.find((item) => item.id === id);
+      const needsSpots =
+        id === 's2' || id === 's4' || Boolean(serviceObj?.hasInjurySpots);
+      if (needsSpots) {
         setInjurySpotsByService((prev) => {
           const current = prev[id] || [];
           if (current.length > 0) return prev;
@@ -575,6 +615,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     }
 
     if (onConfirmWizardBooking) {
+      const resolvedChannel =
+        step3MethodType === 'cash'
+          ? 'Cash / Bayar di Tempat'
+          : step3PaymentChannel ||
+            (step3MethodType === 'qris'
+              ? QRIS_PAYMENT_CHANNELS[0]
+              : BANK_TRANSFER_CHANNELS[0]);
+
       const createdOrder = onConfirmWizardBooking({
         total: pricing.finalPrice,
         scheduleDatePretty: selectedDatePretty,
@@ -586,6 +634,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         payMethodType: step3MethodType,
         markAsPaid: true,
         paymentProofImage: requiresProof ? step3ProofImage : undefined,
+        paymentChannel: resolvedChannel,
         existingOrderId: step3PendingOrderId,
         silentReceipt: false,
       });
@@ -775,17 +824,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           {/* WIZARD LANGKAH 1: GRID ICON CARD ALA TRAVELOKA & KARTU LAYANAN  */}
           {/* =============================================================== */}
           {bookingStep === 1 && (
-            <div className="space-y-3 animate-page-enter">
-              {/* 1. GRID KATEGORI UTAMA (GRID ICON CARD 2 BARIS X 3 KOLOM ALA TRAVELOKA) */}
-              <div className="bg-white p-3.5 rounded-3xl shadow-sm border border-stone-200/90 space-y-2.5">
+            <div className="space-y-2.5 animate-page-enter">
+              {/* 1. GRID KATEGORI UTAMA (GRID ICON CARD 2 BARIS X 3 KOLOM RINGKAS) */}
+              <div className="bg-white p-3 rounded-2xl shadow-xs border border-stone-200/90 space-y-2">
                 <div className="flex justify-between items-center gap-2">
-                  <h2 className="text-base font-black text-[#0B261C]">
+                  <h2 className="text-sm font-black text-[#0B261C]">
                     {isEn ? 'Treatment Categories' : 'Pilih Kategori Terapi'}
                   </h2>
                   <button
                     type="button"
                     onClick={() => setShowPriceListImages(!showPriceListImages)}
-                    className="tactile-btn text-xs font-black bg-amber-50 hover:bg-amber-100 text-[#0B261C] px-3 py-1.5 rounded-xl border border-amber-300 flex items-center gap-1.5 flex-shrink-0"
+                    className="tactile-btn text-[11px] font-black bg-amber-50 hover:bg-amber-100 text-[#0B261C] px-2.5 py-1 rounded-xl border border-amber-300 flex items-center gap-1 flex-shrink-0"
                   >
                     <i className="fa-solid fa-image text-amber-700"></i>
                     <span>{showPriceListImages ? 'Tutup Brosur' : 'Brosur Harga'}</span>
@@ -794,14 +843,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                 {/* Brosur Price List Resmi (Collapsible + Bisa Diklik & Zoom) */}
                 {showPriceListImages && (
-                  <div className="p-3.5 rounded-2xl bg-stone-900 text-white space-y-3 border border-[#D4AF37]/60 animate-page-enter">
-                    <div className="flex items-center justify-between gap-2 bg-white/10 px-3 py-2 rounded-xl border border-[#D4AF37]/30">
-                      <p className="text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                  <div className="p-2.5 rounded-2xl bg-stone-900 text-white space-y-2 border border-[#D4AF37]/60 animate-page-enter">
+                    <div className="flex items-center justify-between gap-2 bg-white/10 px-2.5 py-1.5 rounded-xl border border-[#D4AF37]/30">
+                      <p className="text-[11px] font-bold text-amber-200 flex items-center gap-1.5">
                         <i className="fa-solid fa-magnifying-glass-plus text-[#D4AF37]"></i>
                         <span>Klik gambar brosur untuk perbesar &amp; zoom agar mudah dibaca</span>
                       </p>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-2.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -812,7 +861,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           });
                           setBrochureZoomLevel(1.5);
                         }}
-                        className="tactile-btn group text-left space-y-1.5 bg-stone-800/90 hover:bg-stone-800 p-2 rounded-xl border border-[#D4AF37]/40 hover:border-[#D4AF37] transition focus:outline-none"
+                        className="tactile-btn group text-left space-y-1 bg-stone-800/90 hover:bg-stone-800 p-1.5 rounded-xl border border-[#D4AF37]/40 hover:border-[#D4AF37] transition focus:outline-none"
                       >
                         <div className="relative overflow-hidden rounded-lg">
                           <img
@@ -820,12 +869,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             alt="Price List Griya Ayu Sport Massage"
                             className="w-full rounded-lg object-cover group-hover:scale-105 transition duration-200"
                           />
-                          <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-1 rounded-lg border border-[#D4AF37]/60 flex items-center gap-1 shadow">
+                          <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-0.5 rounded-lg border border-[#D4AF37]/60 flex items-center gap-1 shadow">
                             <i className="fa-solid fa-magnifying-glass-plus"></i>
                             <span>Perbesar</span>
                           </span>
                         </div>
-                        <p className="text-xs text-center font-bold text-amber-200 pt-0.5">
+                        <p className="text-[11px] text-center font-bold text-amber-200">
                           Semua Gender (👨👩)
                         </p>
                       </button>
@@ -840,7 +889,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           });
                           setBrochureZoomLevel(1.5);
                         }}
-                        className="tactile-btn group text-left space-y-1.5 bg-stone-800/90 hover:bg-stone-800 p-2 rounded-xl border border-[#D4AF37]/40 hover:border-[#D4AF37] transition focus:outline-none"
+                        className="tactile-btn group text-left space-y-1 bg-stone-800/90 hover:bg-stone-800 p-1.5 rounded-xl border border-[#D4AF37]/40 hover:border-[#D4AF37] transition focus:outline-none"
                       >
                         <div className="relative overflow-hidden rounded-lg">
                           <img
@@ -848,12 +897,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             alt="Price List Griya Ayu Willness Massage"
                             className="w-full rounded-lg object-cover group-hover:scale-105 transition duration-200"
                           />
-                          <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-1 rounded-lg border border-[#D4AF37]/60 flex items-center gap-1 shadow">
+                          <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-0.5 rounded-lg border border-[#D4AF37]/60 flex items-center gap-1 shadow">
                             <i className="fa-solid fa-magnifying-glass-plus"></i>
                             <span>Perbesar</span>
                           </span>
                         </div>
-                        <p className="text-xs text-center font-bold text-pink-200 pt-0.5">
+                        <p className="text-[11px] text-center font-bold text-pink-200">
                           Khusus Wanita (👩)
                         </p>
                       </button>
@@ -861,8 +910,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   </div>
                 )}
 
-                {/* Grid 2 Baris x 3 Kolom Ikon Bulat Berwarna ala Traveloka */}
-                <div className="grid grid-cols-3 gap-2">
+                {/* Grid 2 Baris x 3 Kolom Ikon Bulat Berwarna (Padat & Rapi) */}
+                <div className="grid grid-cols-3 gap-1.5">
                   {/* Kategori 1: Pijat Kebugaran */}
                   <button
                     type="button"
@@ -871,16 +920,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         selectedGridCategory === 'kebugaran' ? 'all' : 'kebugaran'
                       )
                     }
-                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                    className={`tactile-btn py-2 px-1 rounded-xl flex flex-col items-center text-center gap-1 transition border ${
                       selectedGridCategory === 'kebugaran'
                         ? 'bg-sky-50 border-sky-500 ring-2 ring-sky-500/25'
                         : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
                     }`}
                   >
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 text-white flex items-center justify-center shadow-sm">
-                      <i className="fa-solid fa-hands-holding-circle text-lg"></i>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 text-white flex items-center justify-center shadow-xs">
+                      <i className="fa-solid fa-hands-holding-circle text-sm"></i>
                     </div>
-                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                    <span className="text-[11px] font-extrabold text-[#0B261C] leading-tight">
                       Pijat Kebugaran
                     </span>
                   </button>
@@ -893,16 +942,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         selectedGridCategory === 'otot_cedera' ? 'all' : 'otot_cedera'
                       )
                     }
-                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                    className={`tactile-btn py-2 px-1 rounded-xl flex flex-col items-center text-center gap-1 transition border ${
                       selectedGridCategory === 'otot_cedera'
                         ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-500/25'
                         : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
                     }`}
                   >
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-400 to-red-500 text-white flex items-center justify-center shadow-sm">
-                      <i className="fa-solid fa-person-running text-lg"></i>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-red-500 text-white flex items-center justify-center shadow-xs">
+                      <i className="fa-solid fa-person-running text-sm"></i>
                     </div>
-                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                    <span className="text-[11px] font-extrabold text-[#0B261C] leading-tight">
                       Terapi Otot & Cedera
                     </span>
                   </button>
@@ -915,16 +964,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         selectedGridCategory === 'spa_tubuh' ? 'all' : 'spa_tubuh'
                       )
                     }
-                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                    className={`tactile-btn py-2 px-1 rounded-xl flex flex-col items-center text-center gap-1 transition border ${
                       selectedGridCategory === 'spa_tubuh'
                         ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/25'
                         : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
                     }`}
                   >
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-sm">
-                      <i className="fa-solid fa-spa text-lg"></i>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-xs">
+                      <i className="fa-solid fa-spa text-sm"></i>
                     </div>
-                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                    <span className="text-[11px] font-extrabold text-[#0B261C] leading-tight">
                       Spa Perawatan Tubuh
                     </span>
                   </button>
@@ -937,16 +986,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         selectedGridCategory === 'bekam' ? 'all' : 'bekam'
                       )
                     }
-                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                    className={`tactile-btn py-2 px-1 rounded-xl flex flex-col items-center text-center gap-1 transition border ${
                       selectedGridCategory === 'bekam'
                         ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/25'
                         : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
                     }`}
                   >
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center shadow-sm">
-                      <i className="fa-solid fa-heart-pulse text-lg"></i>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-700 text-white flex items-center justify-center shadow-xs">
+                      <i className="fa-solid fa-heart-pulse text-sm"></i>
                     </div>
-                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                    <span className="text-[11px] font-extrabold text-[#0B261C] leading-tight">
                       Terapi Bekam
                     </span>
                   </button>
@@ -959,16 +1008,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         selectedGridCategory === 'khusus_wanita' ? 'all' : 'khusus_wanita'
                       )
                     }
-                    className={`tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border ${
+                    className={`tactile-btn py-2 px-1 rounded-xl flex flex-col items-center text-center gap-1 transition border ${
                       selectedGridCategory === 'khusus_wanita'
                         ? 'bg-pink-50 border-pink-500 ring-2 ring-pink-500/25'
                         : 'bg-stone-50/70 hover:bg-stone-100 border-stone-200/60'
                     }`}
                   >
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-pink-400 to-rose-600 text-white flex items-center justify-center shadow-sm">
-                      <i className="fa-solid fa-venus text-lg"></i>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-pink-400 to-rose-600 text-white flex items-center justify-center shadow-xs">
+                      <i className="fa-solid fa-venus text-sm"></i>
                     </div>
-                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                    <span className="text-[11px] font-extrabold text-[#0B261C] leading-tight">
                       Khusus Wanita
                     </span>
                   </button>
@@ -980,23 +1029,23 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="tactile-btn py-2.5 px-1.5 rounded-2xl flex flex-col items-center text-center gap-1.5 transition border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80"
+                    className="tactile-btn py-2 px-1 rounded-xl flex flex-col items-center text-center gap-1 transition border border-emerald-200 bg-emerald-50/70 hover:bg-emerald-100/80"
                   >
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] text-white flex items-center justify-center shadow-sm">
-                      <i className="fa-brands fa-whatsapp text-xl"></i>
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#25D366] to-[#128C7E] text-white flex items-center justify-center shadow-xs">
+                      <i className="fa-brands fa-whatsapp text-base"></i>
                     </div>
-                    <span className="text-[11px] sm:text-xs font-extrabold text-[#0B261C] leading-tight">
+                    <span className="text-[11px] font-extrabold text-[#0B261C] leading-tight">
                       Tanya Admin WA
                     </span>
                   </a>
                 </div>
               </div>
 
-              {/* 2. KARTU LAYANAN DI BAWAH GRID (RAPI, JELAS, FONT BESAR) */}
-              <div className="bg-white p-3.5 rounded-3xl shadow-sm border border-stone-200/90 space-y-3">
+              {/* 2. KARTU LAYANAN DI BAWAH GRID (RINGKAS, PADAT & JELAS) */}
+              <div className="bg-white p-3 rounded-2xl shadow-xs border border-stone-200/90 space-y-2.5">
                 {/* Bar Judul Kategori Aktif & Reset Semua Layanan */}
                 <div className="flex justify-between items-center gap-2">
-                  <h3 className="text-base font-black text-[#0B261C] truncate">
+                  <h3 className="text-sm font-black text-[#0B261C] truncate">
                     {selectedGridCategory === 'all' && 'Daftar Layanan Terapi'}
                     {selectedGridCategory === 'kebugaran' && 'Pijat Kebugaran (👨👩)'}
                     {selectedGridCategory === 'otot_cedera' && 'Terapi Otot & Cedera'}
@@ -1008,12 +1057,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     <button
                       type="button"
                       onClick={() => setSelectedGridCategory('all')}
-                      className="tactile-btn text-xs font-black text-emerald-950 bg-emerald-100 hover:bg-emerald-200 px-3 py-1 rounded-xl border border-emerald-300 flex-shrink-0"
+                      className="tactile-btn text-[11px] font-black text-emerald-950 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-1 rounded-lg border border-emerald-300 flex-shrink-0"
                     >
                       Lihat Semua
                     </button>
                   ) : (
-                    <span className="text-xs font-black bg-emerald-100 text-emerald-950 px-2.5 py-1 rounded-xl border border-emerald-300 flex-shrink-0">
+                    <span className="text-[11px] font-black bg-emerald-100 text-emerald-950 px-2.5 py-0.5 rounded-lg border border-emerald-300 flex-shrink-0">
                       {serviceMode === 'single'
                         ? `${chosenSingleIds.length} Dipilih`
                         : chosenPackageId
@@ -1024,13 +1073,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 </div>
 
                 {/* Switch Mode: Layanan Satuan vs Paket Hemat */}
-                <div className="flex bg-stone-100 p-1 rounded-2xl text-xs sm:text-sm font-black">
+                <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-black">
                   <button
                     type="button"
                     onClick={() => setServiceMode('single')}
-                    className={`tactile-btn flex-1 py-2 rounded-xl transition ${
+                    className={`tactile-btn flex-1 py-1.5 rounded-lg transition ${
                       serviceMode === 'single'
-                        ? 'bg-[#0B261C] text-[#D4AF37] shadow-sm'
+                        ? 'bg-[#0B261C] text-[#D4AF37] shadow-2xs'
                         : 'text-stone-600 hover:text-stone-900'
                     }`}
                   >
@@ -1039,9 +1088,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   <button
                     type="button"
                     onClick={() => setServiceMode('package')}
-                    className={`tactile-btn flex-1 py-2 rounded-xl transition ${
+                    className={`tactile-btn flex-1 py-1.5 rounded-lg transition ${
                       serviceMode === 'package'
-                        ? 'bg-[#0B261C] text-[#D4AF37] shadow-sm'
+                        ? 'bg-[#0B261C] text-[#D4AF37] shadow-2xs'
                         : 'text-stone-600 hover:text-stone-900'
                     }`}
                   >
@@ -1051,25 +1100,32 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                 {/* Daftar Kartu Layanan Ringkas & Mudah Dibaca */}
                 {serviceMode === 'single' ? (
-                  <div className="space-y-2.5">
-                    {SINGLE_CATALOG.filter((item) => {
+                  <div className="space-y-2">
+                    {activeSingleCatalog.filter((item) => {
                       if (selectedGridCategory === 'all') return true;
                       return item.gridCategories?.includes(selectedGridCategory);
                     }).map((s) => {
                       const isSelected = chosenSingleIds.includes(s.id);
                       const isFemaleOnly = s.gender === 'female';
+                      const isMaleOnly = s.gender === 'male';
                       const badgeLabel =
-                        s.genderBadge || (isFemaleOnly ? '👩 Khusus Wanita' : '👨👩 Semua Gender');
-                      const hasInjuryTopping = s.id === 's2' || s.id === 's4';
+                        s.genderBadge ||
+                        (isFemaleOnly
+                          ? '👩 Khusus Wanita'
+                          : isMaleOnly
+                          ? '👨 Khusus Pria'
+                          : '👨👩 Semua Gender');
+                      const hasInjuryTopping =
+                        s.id === 's2' || s.id === 's4' || Boolean(s.hasInjurySpots);
                       const serviceSpots = injurySpotsByService[s.id] || [];
                       const isToppingOpen = isSelected && hasInjuryTopping && openInjuryServiceId === s.id;
 
                       return (
                         <div
                           key={s.id}
-                          className={`w-full rounded-2xl border-2 transition overflow-hidden ${
+                          className={`w-full rounded-xl border transition overflow-hidden ${
                             isSelected
-                              ? 'border-[#0B261C] bg-emerald-50/90 shadow-sm'
+                              ? 'border-2 border-[#0B261C] bg-emerald-50/90 shadow-2xs'
                               : 'border-stone-200 bg-white hover:border-emerald-700/40'
                           }`}
                         >
@@ -1084,23 +1140,23 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 toggleSingleItem(s.id);
                               }
                             }}
-                            className="tactile-btn w-full p-3.5 text-left cursor-pointer flex justify-between items-center gap-3"
+                            className="tactile-btn w-full p-2.5 text-left cursor-pointer flex justify-between items-center gap-2.5"
                           >
-                            <div className="min-w-0 flex-1 space-y-1">
-                              {/* Nama Layanan (Font Besar & Jelas) */}
-                              <h4 className="font-extrabold text-sm sm:text-base text-[#0B261C] leading-snug">
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              {/* Nama Layanan */}
+                              <h4 className="font-extrabold text-xs sm:text-sm text-[#0B261C] leading-snug">
                                 {s.name}
                               </h4>
 
                               {/* Baris Info Ringkas: Durasi & Badge Gender */}
-                              <div className="flex items-center gap-2 flex-wrap text-xs font-bold text-stone-600">
+                              <div className="flex items-center gap-1.5 flex-wrap text-[11px] font-bold text-stone-600">
                                 <span className="inline-flex items-center gap-1 text-stone-700">
-                                  <i className="fa-regular fa-clock text-emerald-700"></i>
+                                  <i className="fa-regular fa-clock text-emerald-700 text-[10px]"></i>
                                   {s.duration}
                                 </span>
                                 <span>•</span>
                                 <span
-                                  className={`px-2 py-0.5 rounded-md font-extrabold ${
+                                  className={`px-1.5 py-0.5 rounded font-extrabold text-[10px] ${
                                     isFemaleOnly
                                       ? 'bg-pink-100/90 text-pink-900'
                                       : 'bg-sky-100/90 text-sky-950'
@@ -1110,11 +1166,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 </span>
                               </div>
 
-                              {/* Ringkasan Titik Keluhan Terpilih (Tampil Rapi di Kartu Saat Selesai Dipilih) */}
+                              {s.desc && (
+                                <p className="text-[11px] text-stone-500 leading-snug line-clamp-1">
+                                  {s.desc}
+                                </p>
+                              )}
+
+                              {/* Ringkasan Titik Keluhan Terpilih */}
                               {isSelected && hasInjuryTopping && !isToppingOpen && (
-                                <div className="pt-1 flex items-center gap-1.5 flex-wrap">
-                                  <span className="text-[11px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg inline-flex items-center gap-1">
-                                    <span>🎯 Titik Keluhan:</span>
+                                <div className="pt-0.5 flex items-center gap-1 flex-wrap">
+                                  <span className="text-[10px] font-black text-amber-950 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded inline-flex items-center gap-1">
+                                    <span>🎯 Titik:</span>
                                     <span className="font-extrabold">
                                       {serviceSpots.length > 0
                                         ? serviceSpots.join(', ')
@@ -1127,20 +1189,19 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                       e.stopPropagation();
                                       setOpenInjuryServiceId(s.id);
                                     }}
-                                    className="tactile-btn text-[11px] font-black text-[#0B261C] bg-white hover:bg-amber-50 border border-stone-300 px-2.5 py-1 rounded-lg shadow-2xs"
+                                    className="tactile-btn text-[10px] font-black text-[#0B261C] bg-white hover:bg-amber-50 border border-stone-300 px-2 py-0.5 rounded"
                                   >
-                                    <i className="fa-solid fa-pen-to-square mr-1 text-amber-700"></i>
-                                    Ubah Titik
+                                    Ubah
                                   </button>
                                 </div>
                               )}
 
-                              {/* Harga Besar & Poin */}
-                              <div className="flex items-center gap-2 pt-0.5">
-                                <span className="font-black text-sm sm:text-base text-emerald-900">
+                              {/* Harga & Poin */}
+                              <div className="flex items-center gap-1.5 pt-0.5">
+                                <span className="font-black text-xs sm:text-sm text-emerald-900">
                                   {formatRupiah(s.price)}
                                 </span>
-                                <span className="text-xs font-extrabold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md">
+                                <span className="text-[10px] font-extrabold text-amber-900 bg-amber-100/90 px-1.5 py-0.5 rounded">
                                   +{s.points} Poin
                                 </span>
                               </div>
@@ -1148,9 +1209,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                             {/* Tombol Centang / Pilih Layanan Simpel */}
                             <div
-                              className={`px-3.5 py-2.5 rounded-xl border-2 font-black text-xs sm:text-sm flex items-center gap-1.5 flex-shrink-0 transition ${
+                              className={`px-3 py-2 rounded-xl border font-black text-xs flex items-center gap-1 flex-shrink-0 transition ${
                                 isSelected
-                                  ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37] shadow-xs'
+                                  ? 'bg-[#0B261C] border-[#0B261C] text-[#D4AF37] shadow-2xs'
                                   : 'bg-stone-50 border-stone-300 text-[#0B261C]'
                               }`}
                             >
@@ -1254,14 +1315,20 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 ) : (
                   /* Daftar Paket Hemat di Bawah Grid */
                   <div className="space-y-2.5">
-                    {PACKAGE_CATALOG.filter((p) => {
+                    {activePackageCatalog.filter((p) => {
                       if (selectedGridCategory === 'all') return true;
                       return p.gridCategories?.includes(selectedGridCategory);
                     }).map((p) => {
                       const isSelected = chosenPackageId === p.id;
                       const isFemaleOnly = p.gender === 'female';
+                      const isMaleOnly = p.gender === 'male';
                       const badgeLabel =
-                        p.genderBadge || (isFemaleOnly ? '👩 Khusus Wanita' : '👨👩 Semua Gender');
+                        p.genderBadge ||
+                        (isFemaleOnly
+                          ? '👩 Khusus Wanita'
+                          : isMaleOnly
+                          ? '👨 Khusus Pria'
+                          : '👨👩 Semua Gender');
 
                       return (
                         <div
@@ -1301,10 +1368,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                               >
                                 {badgeLabel}
                               </span>
-                              <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-black">
-                                {p.tag}
-                              </span>
+                              {p.tag && (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-black">
+                                  {p.tag}
+                                </span>
+                              )}
                             </div>
+
+                            {p.desc && (
+                              <p className="text-[11px] text-stone-600 leading-relaxed line-clamp-2">
+                                {p.desc}
+                              </p>
+                            )}
 
                             <div className="flex items-center gap-2 pt-0.5">
                               {p.normalPrice && (
@@ -1918,6 +1993,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             if (step3RemainingMs <= 0) return;
                             setStep3MethodType(m.id);
                             setStep3ProofError('');
+                            const defaultChan =
+                              m.id === 'qris'
+                                ? QRIS_PAYMENT_CHANNELS[0]
+                                : m.id === 'bank_transfer'
+                                ? BANK_TRANSFER_CHANNELS[0]
+                                : 'Cash / Bayar di Tempat';
+                            setStep3PaymentChannel(defaultChan);
                             if (onConfirmWizardBooking && selectedTimeSlot && step3PendingOrderId) {
                               onConfirmWizardBooking({
                                 total: pricing.finalPrice,
@@ -1929,6 +2011,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                 pointsRedeemedCost: pricing.rewardObj.cost,
                                 payMethodType: m.id,
                                 markAsPaid: false,
+                                paymentChannel: defaultChan,
                                 existingOrderId: step3PendingOrderId,
                                 silentReceipt: true,
                               });
@@ -2191,11 +2274,42 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                 {/* KOTAK UPLOAD BUKTI TRANSFER / SCREENSHOT QRIS: WAJIB UNTUK QRIS & TRANSFER BANK */}
                 {(step3MethodType === 'qris' || step3MethodType === 'bank_transfer') && (
-                  <div className="bg-emerald-50/70 p-3.5 rounded-2xl border-2 border-dashed border-emerald-700/50 space-y-2.5 animate-fade">
+                  <div className="bg-emerald-50/70 p-3.5 rounded-2xl border-2 border-dashed border-emerald-700/50 space-y-3 animate-fade">
+                    {/* Pilihan Pembayaran Melalui Aplikasi / Bank Apa */}
+                    <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1.5">
+                      <label
+                        htmlFor="step3PaymentChannelSelect"
+                        className="text-xs font-black text-[#0B261C] flex items-center gap-1.5"
+                      >
+                        <i className="fa-solid fa-building-columns text-emerald-700"></i>
+                        <span>
+                          Pembayaran Melalui Aplikasi / Bank Apa: <span className="text-red-600">*</span>
+                        </span>
+                      </label>
+                      <select
+                        id="step3PaymentChannelSelect"
+                        value={step3PaymentChannel}
+                        onChange={(e) => setStep3PaymentChannel(e.target.value)}
+                        className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] text-stone-900 text-xs font-bold p-2.5 rounded-xl focus:outline-none"
+                      >
+                        {(step3MethodType === 'qris'
+                          ? QRIS_PAYMENT_CHANNELS
+                          : BANK_TRANSFER_CHANNELS
+                        ).map((ch) => (
+                          <option key={ch} value={ch}>
+                            {ch}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-stone-500">
+                        Pilih aplikasi M-Banking / E-Wallet atau rekening tujuan yang Anda gunakan agar Admin mudah mencocokkan mutasi & struk screenshot.
+                      </p>
+                    </div>
+
                     <div className="flex items-center justify-between gap-2">
                       <label className="text-xs font-black text-[#0B261C] flex items-center gap-1.5">
                         <i className="fa-solid fa-camera text-emerald-800"></i>
-                        <span>Upload Bukti Transfer / Screenshot QRIS *</span>
+                        <span>Upload Struk Screenshot Pembayaran Online *</span>
                       </label>
                       <span className="text-[10px] font-black bg-amber-200 text-amber-950 px-2 py-0.5 rounded-md">
                         Wajib Diunggah
@@ -2203,15 +2317,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     </div>
                     <p className="text-[11px] text-stone-600 leading-relaxed">
                       Unggah foto resi atau screenshot bukti pembayaran{' '}
-                      <b>{step3MethodType === 'qris' ? 'QRIS Griya Ayu' : 'Transfer Bank'}</b> untuk
-                      diverifikasi oleh Admin dan mengunci jadwal Anda.
+                      <b>{step3PaymentChannel}</b> untuk dicek keasliannya oleh Admin dan mengunci jadwal Anda.
                     </p>
 
                     <label className="tactile-btn w-full min-h-[46px] bg-white hover:bg-stone-50 text-[#0B261C] border-2 border-[#0B261C]/20 rounded-xl px-3.5 py-2.5 text-xs font-black flex items-center justify-center gap-2 cursor-pointer shadow-2xs">
                       <i className="fa-solid fa-cloud-arrow-up text-emerald-700 text-sm"></i>
                       <span>
                         {step3ProofImage
-                          ? 'Ganti Foto Bukti Pembayaran'
+                          ? 'Ganti Foto Struk Screenshot Pembayaran'
                           : 'Pilih Foto / Screenshot Bukti Bayar'}
                       </span>
                       <input
@@ -2225,7 +2338,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     {step3ProofImage && (
                       <div className="bg-white p-2.5 rounded-xl border border-emerald-300 space-y-1.5">
                         <div className="flex justify-between items-center text-[10px] font-black text-emerald-900">
-                          <span>✓ Preview Bukti Pembayaran Siap Dikirim:</span>
+                          <span>✓ Preview Struk Screenshot Siap Dikirim ke Admin:</span>
                           <button
                             type="button"
                             onClick={() => setStep3ProofImage('')}
@@ -2234,7 +2347,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             Hapus Foto
                           </button>
                         </div>
-                        <div className="h-40 w-full rounded-lg overflow-hidden bg-stone-900 border border-stone-200">
+                        <div className="h-44 w-full rounded-lg overflow-hidden bg-stone-900 border border-stone-200">
                           <img
                             src={step3ProofImage}
                             alt="Preview Bukti Pembayaran"

@@ -1125,8 +1125,8 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest mt-0.5">
               SPORT MASSAGE & SPA
             </p>
-            <p className="text-[11px] text-emerald-100 italic mt-1">
-              "Release Otot, Pulihkan Energi • Melayani dengan Hati"
+            <p className="text-[11px] text-emerald-100 italic mt-1 text-center">
+              "Release Otot, Pulihkan Energi, Melayani dengan Sepenuh Hati"
             </p>
           </div>
 

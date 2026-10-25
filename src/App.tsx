@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   User,
   BookingOrder,
@@ -13,6 +13,7 @@ import {
   PaymentMethodType,
   RefundRequestInfo,
   PointReward,
+  ServiceItem,
 } from './types/index.ts';
 import {
   INITIAL_USERS,
@@ -20,6 +21,8 @@ import {
   INITIAL_TIME_SLOTS,
   INITIAL_NOTIFICATIONS,
   POINT_REWARDS,
+  SINGLE_CATALOG,
+  PACKAGE_CATALOG,
 } from './data/mockData.ts';
 import {
   applyPointsCompletion,
@@ -38,17 +41,23 @@ import {
   saveCustomersPersistently,
   loadBookingsPersistently,
   saveBookingsPersistently,
+  loadDeletedBookingIds,
+  markBookingIdAsDeleted,
   loadActiveSession,
   saveActiveSession,
   clearActiveSession,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
+  GRIYA_AYU_DEFAULT_THERAPIST,
+  sendBookingSummaryWhatsApp,
 } from './utils/spaLogic.ts';
 import {
   subscribeToGlobalCloudState,
   syncCustomerToCloud,
   syncBookingToCloud,
+  deleteBookingFromCloud,
   syncNotificationToCloud,
+  deleteNotificationFromCloud,
   syncSpaSettingsToCloud,
 } from './utils/cloudSync.ts';
 import { CelebrationLayer } from './components/CelebrationLayer.tsx';
@@ -117,6 +126,14 @@ export default function App() {
     safeLoadJson<PointReward[]>(STORAGE_KEYS.POINT_REWARDS, POINT_REWARDS)
   );
 
+  const [singleServices, setSingleServices] = useState<ServiceItem[]>(() =>
+    safeLoadJson<ServiceItem[]>(STORAGE_KEYS.SINGLE_SERVICES, SINGLE_CATALOG)
+  );
+
+  const [packageServices, setPackageServices] = useState<ServiceItem[]>(() =>
+    safeLoadJson<ServiceItem[]>(STORAGE_KEYS.PACKAGE_SERVICES, PACKAGE_CATALOG)
+  );
+
   const [closedWeekdays, setClosedWeekdays] = useState<number[]>(() =>
     safeLoadJson<number[]>(STORAGE_KEYS.CLOSED_WEEKDAYS, [0])
   );
@@ -160,6 +177,127 @@ export default function App() {
     pointsText: null,
     confettiActive: false,
   });
+
+  // State & Ref untuk Notifikasi Murni Bawaan Sistem HP (System Push Notification)
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
+  const [showNotifPrompt, setShowNotifPrompt] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission !== 'granted';
+    }
+    return false;
+  });
+
+  const notifiedBookingIdsRef = useRef<Set<number>>(
+    new Set(loadBookingsPersistently(INITIAL_BOOKINGS).map((b) => b.id))
+  );
+  const deletedBookingIdsRef = useRef<Set<number>>(new Set(loadDeletedBookingIds()));
+  const knownCloudBookingIdsRef = useRef<Set<number>>(new Set());
+  const knownCloudNotifIdsRef = useRef<Set<number>>(new Set());
+  const initialCloudBookingsSyncedRef = useRef<boolean>(false);
+
+  // Fungsi memicu System Push Notification HP saat ada Booking Baru Masuk
+  const triggerBookingPushNotification = useCallback(
+    (nama: string, layanan: string, jam: string, orderKey?: number) => {
+      if (typeof window === 'undefined' || !('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+
+      if (orderKey !== undefined) {
+        if (notifiedBookingIdsRef.current.has(orderKey)) return;
+        notifiedBookingIdsRef.current.add(orderKey);
+      }
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready
+          .then((reg) => {
+            reg.showNotification('Booking Baru Masuk! 💆', {
+              body: `Pelanggan ${nama} memesan ${layanan} untuk jam ${jam}.`,
+              icon: '/icon-192.png',
+              vibrate: [200, 100, 200],
+              data: { url: '/?view=booking', orderKey },
+            } as NotificationOptions & { vibrate?: number[] });
+          })
+          .catch(() => {
+            try {
+              new Notification('Booking Baru Masuk! 💆', {
+                body: `Pelanggan ${nama} memesan ${layanan} untuk jam ${jam}.`,
+                icon: '/icon-192.png',
+              });
+            } catch {
+              // ignore fallback error
+            }
+          });
+      } else {
+        try {
+          new Notification('Booking Baru Masuk! 💆', {
+            body: `Pelanggan ${nama} memesan ${layanan} untuk jam ${jam}.`,
+            icon: '/icon-192.png',
+          });
+        } catch {
+          // ignore
+        }
+      }
+    },
+    []
+  );
+
+  // Otomatis jalankan pengecekan Notification.permission saat user/admin membuka aplikasi atau login
+  const checkNotificationPermission = useCallback(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const currentPerm = Notification.permission;
+    setNotifPermission(currentPerm);
+    if (currentPerm !== 'granted') {
+      setShowNotifPrompt(true);
+    } else {
+      setShowNotifPrompt(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkNotificationPermission();
+  }, [checkNotificationPermission]);
+
+  // Listener saat notifikasi di layar HP ditekan (notificationclick dari Service Worker sw.js)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'booking') {
+      window.dispatchEvent(new CustomEvent('griya-open-booking-dashboard'));
+    }
+
+    if (!('serviceWorker' in navigator)) return;
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NOTIFICATION_CLICK_BOOKING') {
+        window.dispatchEvent(new CustomEvent('griya-open-booking-dashboard'));
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, []);
+
+  const handleRequestNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setShowNotifPrompt(false);
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      setNotifPermission(result);
+      if (result === 'granted') {
+        setShowNotifPrompt(false);
+        triggerCelebration('Notifikasi Aktif 🔔');
+      } else {
+        setShowNotifPrompt(false);
+      }
+    } catch {
+      setShowNotifPrompt(false);
+    }
+  };
 
   // =========================================================================
   // REAL-TIME GLOBAL CLOUD SYNC (FIRESTORE LINTAS PERANGKAT / VERCEL)
@@ -206,7 +344,7 @@ export default function App() {
                 updatedSelf.pass !== curr.pass ||
                 updatedSelf.avatar !== curr.avatar)
             ) {
-              saveActiveSession(updatedSelf, false);
+              saveActiveSession(updatedSelf, false, false);
               return updatedSelf;
             }
             return curr;
@@ -220,15 +358,62 @@ export default function App() {
         setBookings((prevLocal) => {
           const mapById = new Map<number, BookingOrder>();
           const missingInCloud: BookingOrder[] = [];
+          const newlyArrivedBookings: BookingOrder[] = [];
 
           cloudBookings.forEach((cb) => {
             if (cb && typeof cb.id === 'number') {
-              mapById.set(cb.id, cb);
+              if (deletedBookingIdsRef.current.has(cb.id)) {
+                void deleteBookingFromCloud(cb.id);
+                return;
+              }
+              knownCloudBookingIdsRef.current.add(cb.id);
+              const prevMatch = prevLocal.find((lb) => lb.id === cb.id);
+              const mergedOrder: BookingOrder = {
+                ...cb,
+                paymentProofImage: cb.paymentProofImage || prevMatch?.paymentProofImage,
+                paymentChannel: cb.paymentChannel || prevMatch?.paymentChannel,
+                refundRequest: cb.refundRequest
+                  ? {
+                      ...cb.refundRequest,
+                      proofImage:
+                        cb.refundRequest.proofImage || prevMatch?.refundRequest?.proofImage,
+                    }
+                  : prevMatch?.refundRequest,
+              };
+
+              if (
+                initialCloudBookingsSyncedRef.current &&
+                (!notifiedBookingIdsRef.current.has(cb.id) ||
+                  (prevMatch?.status === 'Pending_Payment' && cb.status === 'Paid'))
+              ) {
+                newlyArrivedBookings.push(mergedOrder);
+              }
+              notifiedBookingIdsRef.current.add(cb.id);
+              mapById.set(cb.id, mergedOrder);
+
+              if (!cb.paymentProofImage && prevMatch?.paymentProofImage) {
+                missingInCloud.push(mergedOrder);
+              }
+            }
+          });
+
+          initialCloudBookingsSyncedRef.current = true;
+
+          // Tampilkan System Push Notification jika ada booking baru masuk dari Cloud
+          newlyArrivedBookings.forEach((nb) => {
+            if (nb.status !== 'Cancelled') {
+              triggerBookingPushNotification(nb.customer, nb.items, nb.time);
             }
           });
 
           prevLocal.forEach((lb) => {
-            if (lb && typeof lb.id === 'number' && !mapById.has(lb.id)) {
+            if (
+              lb &&
+              typeof lb.id === 'number' &&
+              !mapById.has(lb.id) &&
+              !deletedBookingIdsRef.current.has(lb.id) &&
+              !knownCloudBookingIdsRef.current.has(lb.id)
+            ) {
               mapById.set(lb.id, lb);
               missingInCloud.push(lb);
             }
@@ -253,12 +438,23 @@ export default function App() {
 
           cloudNotifs.forEach((cn) => {
             if (cn && typeof cn.id === 'number') {
+              if (cn.orderId && deletedBookingIdsRef.current.has(cn.orderId)) {
+                void deleteNotificationFromCloud(cn.id);
+                return;
+              }
+              knownCloudNotifIdsRef.current.add(cn.id);
               mapById.set(cn.id, cn);
             }
           });
 
           prevLocal.forEach((ln) => {
-            if (ln && typeof ln.id === 'number' && !mapById.has(ln.id)) {
+            if (
+              ln &&
+              typeof ln.id === 'number' &&
+              !mapById.has(ln.id) &&
+              !(ln.orderId && deletedBookingIdsRef.current.has(ln.orderId)) &&
+              !knownCloudNotifIdsRef.current.has(ln.id)
+            ) {
               mapById.set(ln.id, ln);
               missingInCloud.push(ln);
             }
@@ -295,6 +491,14 @@ export default function App() {
           setPointRewards(settings.pointRewards);
           safeSaveJson(STORAGE_KEYS.POINT_REWARDS, settings.pointRewards);
         }
+        if (Array.isArray(settings.singleServices) && settings.singleServices.length > 0) {
+          setSingleServices(settings.singleServices);
+          safeSaveJson(STORAGE_KEYS.SINGLE_SERVICES, settings.singleServices);
+        }
+        if (Array.isArray(settings.packageServices)) {
+          setPackageServices(settings.packageServices);
+          safeSaveJson(STORAGE_KEYS.PACKAGE_SERVICES, settings.packageServices);
+        }
         if (settings.adminProfile) {
           const normalizedAdmin: User =
             settings.adminProfile.phone === '085183110392'
@@ -304,7 +508,7 @@ export default function App() {
           safeSaveJson(STORAGE_KEYS.ADMIN_PROFILE, normalizedAdmin);
           setCurrentUser((curr) => {
             if (!curr || curr.role !== 'admin') return curr;
-            saveActiveSession(normalizedAdmin, true);
+            saveActiveSession(normalizedAdmin, true, false);
             return normalizedAdmin;
           });
           if (settings.adminProfile.phone === '085183110392') {
@@ -348,6 +552,14 @@ export default function App() {
   }, [pointRewards]);
 
   useEffect(() => {
+    safeSaveJson(STORAGE_KEYS.SINGLE_SERVICES, singleServices);
+  }, [singleServices]);
+
+  useEffect(() => {
+    safeSaveJson(STORAGE_KEYS.PACKAGE_SERVICES, packageServices);
+  }, [packageServices]);
+
+  useEffect(() => {
     safeSaveJson(STORAGE_KEYS.CLOSED_WEEKDAYS, closedWeekdays);
   }, [closedWeekdays]);
 
@@ -357,8 +569,81 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser && activeScreen === 'app') {
-      saveActiveSession(currentUser, isAdmin);
+      saveActiveSession(currentUser, isAdmin, false);
     }
+  }, [currentUser, isAdmin, activeScreen]);
+
+  // Pemeriksaan otomatis durasi sesi login 3 hari ('griya_customer_session') saat aplikasi dimuat & saat ada/tidak ada aktivitas
+  useEffect(() => {
+    const verifySessionExpiry = (): boolean => {
+      try {
+        const raw = localStorage.getItem('griya_customer_session');
+        if (!raw) {
+          if (currentUser || activeScreen === 'app') {
+            clearActiveSession();
+            setCurrentUser(null);
+            setIsAdmin(false);
+            setActiveScreen('auth');
+          }
+          return false;
+        }
+
+        const parsed = JSON.parse(raw);
+        const expiry = parsed?.expiry;
+
+        // Jika sudah lewat dari 3 hari (Date.now() > expiry), otomatis hapus sesi dan arahkan kembali ke tampilan login
+        if (typeof expiry !== 'number' || Date.now() > expiry) {
+          clearActiveSession();
+          setCurrentUser(null);
+          setIsAdmin(false);
+          setActiveScreen('auth');
+          return false;
+        }
+
+        return true;
+      } catch {
+        clearActiveSession();
+        setCurrentUser(null);
+        setIsAdmin(false);
+        setActiveScreen('auth');
+        return false;
+      }
+    };
+
+    // Periksa saat aplikasi dimuat / state berubah
+    if (!verifySessionExpiry()) {
+      return;
+    }
+
+    let lastActivityRefresh = Date.now();
+    const handleUserActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityRefresh < 60 * 1000) return; // Throttle 1 menit
+      if (verifySessionExpiry() && currentUser && activeScreen === 'app') {
+        lastActivityRefresh = now;
+        saveActiveSession(currentUser, isAdmin, true);
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      verifySessionExpiry();
+    };
+
+    const intervalId = window.setInterval(verifySessionExpiry, 30 * 1000);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('click', handleUserActivity, { passive: true });
+    window.addEventListener('touchstart', handleUserActivity, { passive: true });
+    window.addEventListener('keydown', handleUserActivity, { passive: true });
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('click', handleUserActivity);
+      window.removeEventListener('touchstart', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+    };
   }, [currentUser, isAdmin, activeScreen]);
 
   // Helper update bookings & langsung amankan ke Cloud Global + localStorage
@@ -417,6 +702,7 @@ export default function App() {
 
   // Auth Handlers
   const handleLoginSuccess = (user: User, adminStatus: boolean) => {
+    checkNotificationPermission();
     if (!adminStatus) {
       const latestStored = loadCustomersPersistently(customers);
       const found = latestStored.find(
@@ -441,6 +727,7 @@ export default function App() {
   };
 
   const handleRegisterSuccess = (user: User) => {
+    checkNotificationPermission();
     void syncCustomerToCloud(user);
     setCustomers((prev) => {
       const exists = prev.some(
@@ -552,9 +839,16 @@ export default function App() {
       expiresAt: Date.now() + 20 * 60 * 1000, // 20 Menit
       status: 'Pending_Payment',
       createdAt: nowFormatted(),
+      therapist: GRIYA_AYU_DEFAULT_THERAPIST,
     };
 
     updateBookingsAndPersist((prev) => [newPendingBooking, ...prev]);
+    triggerBookingPushNotification(
+      newPendingBooking.customer,
+      newPendingBooking.items,
+      newPendingBooking.time,
+      newPendingBooking.id
+    );
     setActivePaymentOrderId(newOrderId);
     setPaymentModalOpen(true);
   };
@@ -600,6 +894,7 @@ export default function App() {
     payMethodType: PaymentMethodType;
     markAsPaid: boolean;
     paymentProofImage?: string;
+    paymentChannel?: string;
     existingOrderId?: number | null;
     silentReceipt?: boolean;
   }): BookingOrder | null => {
@@ -668,6 +963,12 @@ export default function App() {
       ? 'Booking Cash (Bayar di Lokasi)'
       : 'Lunas';
 
+    const resolvedChannel = isCash
+      ? 'Tunai di Kasir Studio / Terapis'
+      : draft.paymentChannel || existingOrder?.paymentChannel;
+    const resolvedMethodLabel =
+      !isCash && resolvedChannel ? resolvedChannel : methodInfo.label;
+
     const newBooking: BookingOrder = {
       id: targetOrderId,
       customer: currentUser.name,
@@ -679,19 +980,21 @@ export default function App() {
       total: draft.total,
       ptsEarned: draft.pointsEarned,
       ptsRedeemedCost: draft.pointsRedeemedCost,
-      payMethod: methodInfo.label,
+      payMethod: resolvedMethodLabel,
       payMethodType: draft.payMethodType,
       vaNumber: methodInfo.vaNumber,
       paymentStatus: resolvedPaymentStatus,
       expiresAt: targetExpiresAt,
       status: draft.markAsPaid ? 'Paid' : 'Pending_Payment',
       createdAt: isUpdatingExistingPending ? existingOrder!.createdAt : nowFormatted(),
+      therapist: existingOrder?.therapist || GRIYA_AYU_DEFAULT_THERAPIST,
       verifiedDateIso: !draft.markAsPaid
         ? undefined
         : isCash
         ? existingOrder?.verifiedDateIso
         : getTodayIso(),
       paymentProofImage: draft.paymentProofImage || existingOrder?.paymentProofImage,
+      paymentChannel: resolvedChannel,
     };
 
     updateBookingsAndPersist((prev) => {
@@ -703,6 +1006,9 @@ export default function App() {
     });
 
     if (draft.markAsPaid) {
+      // Kirim notifikasi ringkasan booking otomatis ke WhatsApp pelanggan via VPS Gateway (/api/send-otp)
+      void sendBookingSummaryWhatsApp(newBooking);
+
       const waConfirm = buildAdminWaConfirmationMessage(newBooking);
       const adminNotif: AppNotification = {
         id: Date.now() + 1,
@@ -750,6 +1056,12 @@ export default function App() {
       };
 
       addNotificationsAndSync([adminNotif, customerNotif]);
+      triggerBookingPushNotification(
+        newBooking.customer,
+        newBooking.items,
+        newBooking.time,
+        newBooking.id
+      );
       triggerCelebration(`Jam ${newBooking.time} Terkunci!`);
     } else if (!isUpdatingExistingPending) {
       const pendingNotif: AppNotification = {
@@ -764,6 +1076,12 @@ export default function App() {
         orderId: newBooking.id,
       };
       addNotificationsAndSync([pendingNotif]);
+      triggerBookingPushNotification(
+        newBooking.customer,
+        newBooking.items,
+        newBooking.time,
+        newBooking.id
+      );
     }
 
     if (!draft.silentReceipt) {
@@ -830,7 +1148,8 @@ export default function App() {
   const handlePaymentSuccess = (
     orderId: number,
     methodType: PaymentMethodType,
-    paymentProofImage?: string
+    paymentProofImage?: string,
+    paymentChannel?: string
   ) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
@@ -878,18 +1197,29 @@ export default function App() {
       ? 'Booking Cash (Bayar di Lokasi)'
       : 'Lunas';
 
+    const resolvedChannel = isCash
+      ? 'Tunai di Kasir Studio / Terapis'
+      : paymentChannel || targetOrder.paymentChannel;
+    const resolvedMethodLabel =
+      !isCash && resolvedChannel ? resolvedChannel : details.label;
+
     const updatedOrder: BookingOrder = {
       ...targetOrder,
       payMethodType: methodType,
-      payMethod: details.label,
+      payMethod: resolvedMethodLabel,
       vaNumber: details.vaNumber,
       paymentStatus: resolvedStatus,
       status: 'Paid',
+      therapist: targetOrder.therapist || GRIYA_AYU_DEFAULT_THERAPIST,
       verifiedDateIso: isCash ? targetOrder.verifiedDateIso : getTodayIso(),
       paymentProofImage: paymentProofImage || targetOrder.paymentProofImage,
+      paymentChannel: resolvedChannel,
     };
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+
+    // Kirim notifikasi ringkasan booking otomatis ke WhatsApp pelanggan via VPS Gateway (/api/send-otp)
+    void sendBookingSummaryWhatsApp(updatedOrder);
 
     // Buat Notifikasi Otomatis untuk Admin beserta Kata-Kata Konfirmasi WA Pelanggan
     const waConfirm = buildAdminWaConfirmationMessage(updatedOrder);
@@ -936,6 +1266,12 @@ export default function App() {
     };
 
     addNotificationsAndSync([adminNotif, customerNotif]);
+    triggerBookingPushNotification(
+      updatedOrder.customer,
+      updatedOrder.items,
+      updatedOrder.time,
+      updatedOrder.id + 1
+    );
     setPaymentModalOpen(false);
     triggerCelebration(`Jam ${updatedOrder.time} Lock`);
     setReceiptOrderId(updatedOrder.id);
@@ -1310,6 +1646,85 @@ export default function App() {
     );
   };
 
+  // Admin Menghapus Pesanan Baru / Pesanan Iseng (Main-main Asal Booking) Secara Permanen
+  const handleDeleteBookingOrder = (orderId: number) => {
+    const targetOrder = bookings.find((b) => b.id === orderId);
+    if (!targetOrder) return;
+
+    markBookingIdAsDeleted(orderId);
+    deletedBookingIdsRef.current.add(orderId);
+    knownCloudBookingIdsRef.current.delete(orderId);
+
+    // Jika pesanan sebelumnya berstatus Completed dan sempat memberi poin, atau sempat memotong poin saat belum batal, sesuaikan poin pelanggan
+    const wasAlreadyCancelledOrRefunded =
+      targetOrder.status === 'Cancelled' ||
+      targetOrder.status === 'Refund_Completed' ||
+      targetOrder.paymentStatus === 'Refund Selesai / Dibatalkan';
+    const ptsToDeduct = targetOrder.status === 'Completed' ? targetOrder.ptsEarned || 0 : 0;
+    const ptsToRestore = !wasAlreadyCancelledOrRefunded ? targetOrder.ptsRedeemedCost || 0 : 0;
+    const netPointDelta = ptsToRestore - ptsToDeduct;
+
+    if (netPointDelta !== 0) {
+      if (
+        currentUser &&
+        normalizePhoneDigits(currentUser.phone) === normalizePhoneDigits(targetOrder.wa)
+      ) {
+        setCurrentUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, points: Math.max(0, prev.points + netPointDelta) };
+          saveActiveSession(updated, isAdmin);
+          void syncCustomerToCloud(updated);
+          return updated;
+        });
+      }
+
+      setCustomers((prev) => {
+        const next = prev.map((u) => {
+          if (normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)) {
+            const updatedCustomer = { ...u, points: Math.max(0, u.points + netPointDelta) };
+            void syncCustomerToCloud(updatedCustomer);
+            return updatedCustomer;
+          }
+          return u;
+        });
+        saveCustomersPersistently(next);
+        return next;
+      });
+    }
+
+    setBookings((prev) => {
+      const next = prev.filter((b) => b.id !== orderId);
+      saveBookingsPersistently(next);
+      return next;
+    });
+    void deleteBookingFromCloud(orderId);
+
+    // Hapus juga notifikasi terkait pesanan tersebut agar tidak menumpuk
+    setNotifications((prev) => {
+      const toDelete = prev.filter((n) => n.orderId === orderId);
+      toDelete.forEach((n) => {
+        knownCloudNotifIdsRef.current.delete(n.id);
+        void deleteNotificationFromCloud(n.id);
+      });
+      const next = prev.filter((n) => n.orderId !== orderId);
+      safeSaveJson(STORAGE_KEYS.NOTIFICATIONS, next);
+      return next;
+    });
+
+    if (receiptOrderId === orderId) {
+      setReceiptOrderId(null);
+    }
+    if (activePaymentOrderId === orderId) {
+      setPaymentModalOpen(false);
+      setActivePaymentOrderId(null);
+    }
+
+    showToast(
+      'Pesanan Berhasil Dihapus! 🗑️',
+      `Pesanan #GA-${String(orderId).slice(-6)} atas nama ${targetOrder.customer} (${targetOrder.datePretty} • Jam ${targetOrder.time} WIB) telah dihapus permanen dan slot jadwal kembali terbuka.`
+    );
+  };
+
   // Admin Bot Broadcast Promo ke Semua WA Pelanggan & Bar Notifikasi Pelanggan
   const handleBroadcastPromo = (promo: {
     title: string;
@@ -1425,6 +1840,21 @@ export default function App() {
     void syncSpaSettingsToCloud({ pointRewards: nextRewards });
   };
 
+  // Kelola Katalog Layanan Sport Massage & SPA oleh Admin (Tambah / Edit / Hapus / Status)
+  const handleUpdateServices = (
+    nextSingleServices: ServiceItem[],
+    nextPackageServices: ServiceItem[]
+  ) => {
+    setSingleServices(nextSingleServices);
+    setPackageServices(nextPackageServices);
+    safeSaveJson(STORAGE_KEYS.SINGLE_SERVICES, nextSingleServices);
+    safeSaveJson(STORAGE_KEYS.PACKAGE_SERVICES, nextPackageServices);
+    void syncSpaSettingsToCloud({
+      singleServices: nextSingleServices,
+      packageServices: nextPackageServices,
+    });
+  };
+
   // Penukaran Poin Langsung oleh Pelanggan di Halaman Poin
   const handleRedeemPointReward = (reward: PointReward) => {
     if (!currentUser) return;
@@ -1530,6 +1960,45 @@ export default function App() {
         {/* BANNER INSTALASI PWA KE LAYAR UTAMA HP */}
         <PWAInstallBanner />
 
+        {/* DIALOG / BANNER HALUS IZIN NOTIFIKASI SISTEM HP (RINGKAS) */}
+        {notifPermission !== 'granted' && showNotifPrompt && (
+          <div className="mx-3 mt-1.5 mb-0.5 rounded-xl bg-gradient-to-r from-[#0B261C] via-[#113829] to-[#0B261C] border border-[#D4AF37]/50 px-2.5 py-2 shadow-sm text-white relative overflow-hidden">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-7 h-7 rounded-lg bg-[#D4AF37]/20 border border-[#D4AF37]/50 flex items-center justify-center shrink-0 text-[#D4AF37]">
+                  <i className="fa-solid fa-bell text-xs animate-bounce"></i>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-black text-[#D4AF37] truncate leading-tight">
+                    Notifikasi Booking HP
+                  </p>
+                  <p className="text-[10px] text-stone-200 truncate leading-tight">
+                    Aktifkan pemberitahuan booking baru di layar HP
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRequestNotificationPermission}
+                  className="tactile-btn py-1.5 px-2.5 rounded-lg bg-gradient-to-r from-[#D4AF37] to-[#b89323] text-[#0B261C] font-black text-[11px] shadow-xs whitespace-nowrap"
+                >
+                  Aktifkan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowNotifPrompt(false)}
+                  aria-label="Tutup dialog notifikasi"
+                  className="text-stone-300 hover:text-white text-xs px-1.5 py-1 rounded-lg"
+                >
+                  <i className="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* =============================================================== */}
         {/* TAMPILAN AWAL: LOGIN & DAFTAR AKUN                              */}
         {/* =============================================================== */}
@@ -1553,6 +2022,8 @@ export default function App() {
             notifications={notifications}
             masterTimeSlots={masterTimeSlots}
             pointRewards={pointRewards}
+            singleServices={singleServices}
+            packageServices={packageServices}
             closedWeekdays={closedWeekdays}
             closedSpecificDates={closedSpecificDates}
             language={language}
@@ -1581,6 +2052,8 @@ export default function App() {
             notifications={notifications}
             masterTimeSlots={masterTimeSlots}
             pointRewards={pointRewards}
+            singleServices={singleServices}
+            packageServices={packageServices}
             closedWeekdays={closedWeekdays}
             closedSpecificDates={closedSpecificDates}
             language={language}
@@ -1588,10 +2061,78 @@ export default function App() {
             onUpdateUser={handleUpdateUser}
             onUpdateCustomerAccount={handleUpdateCustomerAccount}
             onUpdatePointRewards={handleUpdatePointRewards}
+            onUpdateServices={handleUpdateServices}
             onVerifyPayment={handleVerifyPayment}
             onCompleteTreatment={handleCompleteTreatment}
             onApproveRefund={handleApproveRefund}
             onRejectRefund={handleRejectRefund}
+            onUpdateBookingProof={(orderId, proofImage, paymentChannel) => {
+              updateBookingsAndPersist((prev) =>
+                prev.map((b) =>
+                  b.id === orderId
+                    ? {
+                        ...b,
+                        paymentProofImage: proofImage,
+                        paymentChannel: paymentChannel || b.paymentChannel,
+                        payMethod: paymentChannel || b.payMethod,
+                      }
+                    : b
+                )
+              );
+              showToast(
+                'Bukti Screenshot Disimpan! 📸',
+                'Foto struk screenshot bukti pembayaran pelanggan telah diperbarui pada pesanan ini.'
+              );
+            }}
+            onRejectFakePayment={(orderId, reason) => {
+              const target = bookings.find((b) => b.id === orderId);
+              if (!target) return;
+              updateBookingsAndPersist((prev) =>
+                prev.map((b) =>
+                  b.id === orderId
+                    ? {
+                        ...b,
+                        paymentStatus: 'Gagal',
+                        status: 'Cancelled',
+                        refundRejectedReason: reason,
+                      }
+                    : b
+                )
+              );
+              const rejectNotif: AppNotification = {
+                id: Date.now(),
+                target: 'customer',
+                targetPhone: target.wa,
+                type: 'refund_rejected',
+                title: `❌ Bukti Pembayaran Tidak Valid / Ditolak — Jam ${target.time} WIB Dibuka Kembali`,
+                message: `Mohon maaf Kak ${target.customer}, setelah dilakukan pengecekan mutasi oleh Admin Griya Ayu, struk bukti pembayaran untuk jadwal ${target.datePretty} • Jam ${target.time} WIB dinyatakan TIDAK VALID (${reason}). Pesanan dibatalkan dan slot jam kembali dibuka.`,
+                createdAt: nowFormatted(),
+                read: false,
+                orderId: target.id,
+              };
+              addNotificationsAndSync([rejectNotif]);
+              const rawPhone = target.wa.replace(/[^0-9]/g, '');
+              const waTarget = rawPhone.startsWith('0')
+                ? '62' + rawPhone.slice(1)
+                : rawPhone;
+              const waRejectUrl = `https://wa.me/${waTarget}?text=${encodeURIComponent(
+                `Halo Kak *${target.customer}*, kami dari *Admin Griya Ayu Sport Massage & Spa*.\n\nSetelah kami melakukan pengecekan pada struk screenshot pembayaran *#GA-${String(
+                  target.id
+                ).slice(-6)}* (${target.payMethod} • ${formatRupiah(
+                  target.total
+                )}), bukti pembayaran tersebut *belum masuk ke mutasi rekening resmi / tidak valid*.\n\n📌 *Catatan Admin:* ${reason}\n\nOleh karena itu jadwal *${
+                  target.datePretty
+                } • Jam ${
+                  target.time
+                } WIB* otomatis dibatalkan dan dibuka kembali. Silakan hubungi kami atau kirimkan bukti pembayaran yang sah ya. Terima kasih.`
+              )}`;
+              showToast(
+                'Pesanan Ditolak & Slot Dibuka Kembali ⚠️',
+                `Pesanan ${target.customer} telah dibatalkan karena bukti pembayaran tidak valid / palsu. Klik tombol WhatsApp untuk mengabari pelanggan.`,
+                waRejectUrl
+              );
+            }}
+            onDeleteBooking={handleDeleteBookingOrder}
             onToggleWeekdayHoliday={handleToggleWeekdayHoliday}
             onToggleCustomHolidayDate={handleToggleCustomHolidayDate}
             onRemoveSpecificHoliday={handleRemoveSpecificHoliday}

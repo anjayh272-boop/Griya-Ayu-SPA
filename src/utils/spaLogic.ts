@@ -59,6 +59,23 @@ export const GRIYA_AYU_ADMIN_PHONE = '087765573476';
 export const GRIYA_AYU_ADMIN_PHONE_DISPLAY = '0877-6557-3476';
 export const GRIYA_AYU_ADMIN_WA = '6287765573476';
 
+export const QRIS_PAYMENT_CHANNELS = [
+  'QRIS via BCA Mobile / myBCA',
+  "QRIS via Livin' by Mandiri",
+  'QRIS via BRImo (Bank BRI)',
+  'QRIS via BNI Mobile / Wondr',
+  'QRIS via GoPay',
+  'QRIS via DANA',
+  'QRIS via OVO',
+  'QRIS via ShopeePay',
+  'QRIS via SeaBank / Bank Digital',
+] as const;
+
+export const BANK_TRANSFER_CHANNELS = [
+  'Transfer ke Bank BCA (7285780985 a.n. KARTINI)',
+  'Transfer ke Bank Mandiri (1560010933630 a.n. KARTINI)',
+] as const;
+
 export function getPaymentMethodDetails(
   methodType: PaymentMethodType,
   customerPhone: string = '081288997766'
@@ -462,7 +479,7 @@ export function calculateOrderPricing(
     chosenSingleIds.forEach((id) => {
       const s = singleCatalog.find((item) => item.id === id);
       if (s) {
-        if ((id === 's2' || id === 's4') && injurySpot) {
+        if ((id === 's2' || id === 's4' || s.hasInjurySpots) && injurySpot) {
           if (typeof injurySpot === 'string') {
             titles.push(`${s.name} [${injurySpot}]`);
           } else {
@@ -737,16 +754,23 @@ export const STORAGE_KEYS = {
   CUSTOMERS: 'griya_ayu_customers_live',
   BOOKINGS: 'griya_ayu_bookings_live',
   OMZET_LEDGER: 'griya_ayu_omzet_ledger_live',
+  DELETED_BOOKING_IDS: 'griya_ayu_deleted_booking_ids_live',
   NOTIFICATIONS: 'griya_ayu_notifications_live',
   SLOTS: 'griya_ayu_slots_live',
   POINT_REWARDS: 'griya_ayu_point_rewards_live',
+  SINGLE_SERVICES: 'griya_ayu_single_services_live',
+  PACKAGE_SERVICES: 'griya_ayu_package_services_live',
   CLOSED_WEEKDAYS: 'griya_ayu_closed_weekdays_live',
   CLOSED_DATES: 'griya_ayu_closed_dates_live',
   ADMIN_PROFILE: 'griya_ayu_admin_profile',
-  ACTIVE_SESSION: 'griya_ayu_active_session',
+  CUSTOMER_SESSION: 'griya_customer_session',
+  ACTIVE_SESSION: 'griya_customer_session',
+  LEGACY_ACTIVE_SESSION: 'griya_ayu_active_session',
   FONNTE_TOKEN: 'griya_ayu_fonnte_token_live',
   LANG: 'griya_ayu_lang',
 } as const;
+
+export const CUSTOMER_SESSION_DURATION_MS = 3 * 24 * 60 * 60 * 1000; // 3 Hari (dalam milidetik)
 
 export const DEFAULT_FONNTE_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
 
@@ -770,45 +794,105 @@ export function saveFonnteToken(token: string): string {
   return cleaned;
 }
 
+export const GRIYA_AYU_DEFAULT_THERAPIST = 'Rismawati, AIFMO-P (Terapis Utama Griya Ayu)';
+
 /**
- * Mengirim kode OTP 6 digit langsung ke WhatsApp pelanggan secara real-time melalui API Fonnte.
+ * Mengirim pesan WhatsApp melalui endpoint proxy backend (/api/send-otp)
+ * yang meneruskan request ke VPS WhatsApp Gateway (http://104.234.26.109:2219/api/send-message).
  */
-export async function sendFonnteOtpWhatsApp(
+export async function sendWhatsAppViaVpsGateway(
   targetPhone: string,
-  otpCode: string
-): Promise<{ ok: boolean; detail: string }> {
-  const token = getFonnteToken();
-  const cleanTarget = targetPhone.replace(/[^0-9]/g, '');
-  const message = `*GRIYA AYU SPA*\n\nKode OTP verifikasi Anda adalah: *${otpCode}*\nJangan berikan kode ini kepada siapa pun.`;
-
-  const formData = new FormData();
-  formData.append('target', cleanTarget);
-  formData.append('message', message);
-  formData.append('countryCode', '62');
-
-  const response = await fetch('https://api.fonnte.com/send', {
-    method: 'POST',
-    headers: {
-      Authorization: token,
-    },
-    body: formData,
-  });
-
-  const data = await response.json().catch(() => null);
-  if (!response.ok || (data && data.status === false)) {
+  message: string
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const cleanTarget = (targetPhone || '').replace(/[^0-9]/g, '');
+  if (!cleanTarget) {
     return {
       ok: false,
-      detail:
-        data?.reason ||
-        data?.detail ||
-        'Gagal mengirim Kode OTP ke WhatsApp. Pastikan perangkat WhatsApp Fonnte terhubung.',
+      detail: 'Nomor tujuan WhatsApp tidak valid.',
     };
   }
 
-  return {
-    ok: true,
-    detail: 'Kode OTP telah dikirim ke WhatsApp Anda!',
-  };
+  try {
+    const response = await fetch('/api/send-otp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        target: cleanTarget,
+        message,
+      }),
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok || (data && (data.status === false || data.success === false))) {
+      return {
+        ok: false,
+        detail:
+          data?.error ||
+          data?.reason ||
+          data?.detail ||
+          data?.message ||
+          'Gagal mengirim pesan ke WhatsApp Gateway VPS.',
+        data,
+      };
+    }
+
+    return {
+      ok: true,
+      detail: 'Pesan WhatsApp berhasil dikirim ke nomor tujuan!',
+      data,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      detail:
+        error instanceof Error
+          ? error.message
+          : 'Gagal terhubung ke server proxy WhatsApp Gateway.',
+    };
+  }
+}
+
+/**
+ * Mengirim kode OTP 6 digit langsung ke WhatsApp pelanggan melalui proxy /api/send-otp -> VPS Gateway.
+ */
+export async function sendOtpWhatsApp(
+  targetPhone: string,
+  otpCode: string
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const message = `Halo! Kode verifikasi OTP Griya Ayu Sport Massage & SPA Anda adalah: ${otpCode}. Jangan bagikan kode ini kepada siapa pun.`;
+  return sendWhatsAppViaVpsGateway(targetPhone, message);
+}
+
+export const sendFonnteOtpWhatsApp = sendOtpWhatsApp;
+
+/**
+ * Mengirim notifikasi ringkasan booking otomatis ke WhatsApp pelanggan saat pemesanan berhasil dikonfirmasi.
+ * Berisi: Nama Pelanggan, Layanan Massage yang Dipilih, Nama Terapis, serta Tanggal & Jam Booking.
+ */
+export async function sendBookingSummaryWhatsApp(
+  order: BookingOrder
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const invoiceCode = `GA-${String(order.id).slice(-6)}`;
+  const therapistName = order.therapist || GRIYA_AYU_DEFAULT_THERAPIST;
+  const message =
+    `Halo Kak *${order.customer}*! 🌿✨\n` +
+    `Terima kasih, pemesanan Anda di *Griya Ayu Sport Massage & SPA* telah berhasil dikonfirmasi.\n\n` +
+    `*RINGKASAN BOOKING ANDA:*\n` +
+    `----------------------------------------\n` +
+    `🧾 *No. Booking:* #${invoiceCode}\n` +
+    `👤 *Nama Pelanggan:* ${order.customer}\n` +
+    `💆 *Layanan Massage:* ${order.items}\n` +
+    `👩‍⚕️ *Nama Terapis:* ${therapistName}\n` +
+    `📅 *Tanggal & Jam Booking:* ${order.datePretty} • Jam ${order.time} WIB\n` +
+    `💳 *Metode Pembayaran:* ${order.payMethod} (${order.paymentStatus})\n` +
+    `💰 *Total Biaya:* ${formatRupiah(order.total)}\n` +
+    `📍 *Lokasi:* ${GRIYA_AYU_ADDRESS}\n` +
+    `----------------------------------------\n` +
+    `Mohon hadir maksimal 10 menit sebelum jadwal sesi dimulai ya Kak. Sampai jumpa di Griya Ayu! 🙏`;
+
+  return sendWhatsAppViaVpsGateway(order.wa, message);
 }
 
 export function safeLoadJson<T>(key: string, fallback: T): T {
@@ -840,6 +924,27 @@ export function normalizePhoneDigits(phone: string): string {
 }
 
 /**
+ * Memuat daftar ID pesanan yang sudah dihapus permanen oleh Admin.
+ */
+export function loadDeletedBookingIds(): number[] {
+  const ids = safeLoadJson<number[]>(STORAGE_KEYS.DELETED_BOOKING_IDS, []);
+  return Array.isArray(ids) ? ids.filter((id) => typeof id === 'number') : [];
+}
+
+/**
+ * Menandai 1 ID pesanan sebagai telah dihapus permanen agar tidak muncul lagi dari cache/mock.
+ */
+export function markBookingIdAsDeleted(orderId: number): number[] {
+  const current = loadDeletedBookingIds();
+  if (!current.includes(orderId)) {
+    const next = [...current, orderId];
+    safeSaveJson(STORAGE_KEYS.DELETED_BOOKING_IDS, next);
+    return next;
+  }
+  return current;
+}
+
+/**
  * Memuat daftar akun pelanggan dari localStorage tanpa pernah mereset data yang sudah ada.
  */
 export function loadCustomersPersistently(fallback: User[] = []): User[] {
@@ -859,9 +964,11 @@ export function saveCustomersPersistently(customers: User[]): void {
 
 /**
  * Memuat riwayat booking & menggabungkannya dengan cadangan buku besar omzet (omzet ledger)
- * agar data transaksi terverifikasi (omzet harian & bulanan) tidak pernah hilang.
+ * agar data transaksi terverifikasi (omzet harian & bulanan) tidak pernah hilang,
+ * kecuali yang sudah dihapus permanen oleh Admin.
  */
 export function loadBookingsPersistently(fallback: BookingOrder[] = []): BookingOrder[] {
+  const deletedSet = new Set(loadDeletedBookingIds());
   const mainList = safeLoadJson<BookingOrder[] | null>(STORAGE_KEYS.BOOKINGS, null);
   const ledgerList = safeLoadJson<BookingOrder[] | null>(STORAGE_KEYS.OMZET_LEDGER, null);
 
@@ -887,12 +994,12 @@ export function loadBookingsPersistently(fallback: BookingOrder[] = []): Booking
     return b;
   };
 
-  const base: BookingOrder[] = (Array.isArray(mainList) ? mainList : fallback).map(
-    normalizeNonCashLunas
-  );
-  const ledger: BookingOrder[] = (Array.isArray(ledgerList) ? ledgerList : []).map(
-    normalizeNonCashLunas
-  );
+  const base: BookingOrder[] = (Array.isArray(mainList) ? mainList : fallback)
+    .filter((b) => b && !deletedSet.has(b.id))
+    .map(normalizeNonCashLunas);
+  const ledger: BookingOrder[] = (Array.isArray(ledgerList) ? ledgerList : [])
+    .filter((b) => b && !deletedSet.has(b.id))
+    .map(normalizeNonCashLunas);
 
   if (ledger.length === 0) {
     return base;
@@ -901,13 +1008,14 @@ export function loadBookingsPersistently(fallback: BookingOrder[] = []): Booking
   // Pastikan setiap transaksi terverifikasi di buku besar omzet tetap ada dan terjaga status verifikasinya
   const mapById = new Map<number, BookingOrder>();
   base.forEach((b) => {
-    if (b && typeof b.id === 'number') {
+    if (b && typeof b.id === 'number' && !deletedSet.has(b.id)) {
       mapById.set(b.id, b);
     }
   });
 
   ledger.forEach((ledgerOrder) => {
-    if (!ledgerOrder || typeof ledgerOrder.id !== 'number') return;
+    if (!ledgerOrder || typeof ledgerOrder.id !== 'number' || deletedSet.has(ledgerOrder.id))
+      return;
     const existing = mapById.get(ledgerOrder.id);
     if (!existing) {
       mapById.set(ledgerOrder.id, ledgerOrder);
@@ -936,8 +1044,10 @@ export function loadBookingsPersistently(fallback: BookingOrder[] = []): Booking
  * ke buku besar khusus tanpa gambar berat agar 100% aman dari batas kuota memori browser.
  */
 export function saveBookingsPersistently(bookings: BookingOrder[]): void {
+  const deletedSet = new Set(loadDeletedBookingIds());
+  const cleanBookings = bookings.filter((b) => b && !deletedSet.has(b.id));
   // 1. Amankan data Omzet Harian & Bulanan terlebih dahulu ke buku besar ringan (tanpa base64 foto)
-  const verifiedLedger: BookingOrder[] = bookings
+  const verifiedLedger: BookingOrder[] = cleanBookings
     .filter((b) => isVerifiedRevenueOrder(b))
     .map((b) => ({
       ...b,
@@ -949,13 +1059,13 @@ export function saveBookingsPersistently(bookings: BookingOrder[]): void {
   safeSaveJson(STORAGE_KEYS.OMZET_LEDGER, verifiedLedger);
 
   // 2. Simpan data booking lengkap beserta foto bukti transfer
-  const savedFull = safeSaveJson(STORAGE_KEYS.BOOKINGS, bookings);
+  const savedFull = safeSaveJson(STORAGE_KEYS.BOOKINGS, cleanBookings);
   if (savedFull) return;
 
   // 3. Fallback jika memori localStorage penuh (QuotaExceededError akibat banyak foto resolusi tinggi):
   //    Kompres/hapus base64 foto dari pesanan lama yang sudah selesai/dibatalkan terlebih dahulu,
   //    sehingga riwayat pesanan, status pembayaran, dan angka omzet TIDAK PERNAH GAGAL TERSIMPAN.
-  const trimmedOldCompleted = bookings.map((b, idx) => {
+  const trimmedOldCompleted = cleanBookings.map((b, idx) => {
     const isOldDone =
       idx >= 5 &&
       (b.status === 'Completed' ||
@@ -975,7 +1085,7 @@ export function saveBookingsPersistently(bookings: BookingOrder[]): void {
   if (safeSaveJson(STORAGE_KEYS.BOOKINGS, trimmedOldCompleted)) return;
 
   // 4. Fallback terakhir: simpan seluruh teks transaksi & omzet tanpa gambar base64
-  const lightBookings = bookings.map((b) => ({
+  const lightBookings = cleanBookings.map((b) => ({
     ...b,
     paymentProofImage: undefined,
     refundRequest: b.refundRequest
@@ -987,25 +1097,127 @@ export function saveBookingsPersistently(bookings: BookingOrder[]): void {
 
 export interface PersistedSession {
   user: User;
+  customer?: User;
   isAdmin: boolean;
-}
-
-export function loadActiveSession(): PersistedSession | null {
-  const session = safeLoadJson<PersistedSession | null>(STORAGE_KEYS.ACTIVE_SESSION, null);
-  if (!session || !session.user || !session.user.phone) return null;
-  return session;
-}
-
-export function saveActiveSession(user: User, isAdmin: boolean): void {
-  safeSaveJson(STORAGE_KEYS.ACTIVE_SESSION, { user, isAdmin });
+  expiry: number;
+  lastActivityAt?: number;
 }
 
 export function clearActiveSession(): void {
   try {
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+    localStorage.removeItem('griya_customer_session');
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_ACTIVE_SESSION);
+    sessionStorage.removeItem('griya_customer_session');
+    sessionStorage.removeItem(STORAGE_KEYS.LEGACY_ACTIVE_SESSION);
   } catch {
     // ignore
   }
+}
+
+export function loadActiveSession(): PersistedSession | null {
+  try {
+    // Pastikan tidak pernah menggunakan sessionStorage untuk sesi login pelanggan
+    sessionStorage.removeItem('griya_customer_session');
+    sessionStorage.removeItem(STORAGE_KEYS.LEGACY_ACTIVE_SESSION);
+  } catch {
+    // ignore
+  }
+
+  let session = safeLoadJson<Partial<PersistedSession> | null>(
+    'griya_customer_session',
+    null
+  );
+
+  // Migrasi satu kali jika sebelumnya ada sesi di key lama
+  if (!session) {
+    const legacy = safeLoadJson<Partial<PersistedSession> | null>(
+      STORAGE_KEYS.LEGACY_ACTIVE_SESSION,
+      null
+    );
+    if (legacy && (legacy.user || legacy.customer)) {
+      const migratedUser = (legacy.user || legacy.customer) as User;
+      const migratedExpiry =
+        typeof legacy.expiry === 'number' && legacy.expiry > 0
+          ? legacy.expiry
+          : Date.now() + (3 * 24 * 60 * 60 * 1000);
+      session = {
+        user: migratedUser,
+        customer: migratedUser,
+        isAdmin: Boolean(legacy.isAdmin),
+        expiry: migratedExpiry,
+        lastActivityAt: Date.now(),
+      };
+      safeSaveJson('griya_customer_session', session);
+      try {
+        localStorage.removeItem(STORAGE_KEYS.LEGACY_ACTIVE_SESSION);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  if (!session) return null;
+
+  const resolvedUser = session.user || session.customer;
+  if (!resolvedUser || !resolvedUser.phone) {
+    clearActiveSession();
+    return null;
+  }
+
+  // Periksa timestamp kedaluwarsa (expiry): jika sudah lewat dari 3 hari, otomatis hapus sesi dari localStorage
+  if (typeof session.expiry !== 'number' || Date.now() > session.expiry) {
+    clearActiveSession();
+    return null;
+  }
+
+  return {
+    user: resolvedUser,
+    customer: resolvedUser,
+    isAdmin: Boolean(session.isAdmin),
+    expiry: session.expiry,
+    lastActivityAt: session.lastActivityAt,
+  };
+}
+
+export function saveActiveSession(
+  user: User,
+  isAdmin: boolean,
+  refreshExpiry: boolean = true
+): void {
+  try {
+    sessionStorage.removeItem('griya_customer_session');
+    sessionStorage.removeItem(STORAGE_KEYS.LEGACY_ACTIVE_SESSION);
+    localStorage.removeItem(STORAGE_KEYS.LEGACY_ACTIVE_SESSION);
+  } catch {
+    // ignore
+  }
+
+  const now = Date.now();
+  let expiry = now + (3 * 24 * 60 * 60 * 1000);
+
+  if (!refreshExpiry) {
+    const existing = safeLoadJson<Partial<PersistedSession> | null>(
+      'griya_customer_session',
+      null
+    );
+    if (existing && typeof existing.expiry === 'number') {
+      if (now > existing.expiry) {
+        clearActiveSession();
+        return;
+      }
+      expiry = existing.expiry;
+    }
+  }
+
+  const payload: PersistedSession = {
+    user,
+    customer: user,
+    isAdmin,
+    expiry,
+    lastActivityAt: now,
+  };
+
+  safeSaveJson('griya_customer_session', payload);
 }
 
 /**

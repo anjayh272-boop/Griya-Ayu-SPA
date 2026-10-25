@@ -1,9 +1,12 @@
-const CACHE_NAME = 'griya-ayu-pwa-v1';
+const CACHE_NAME = 'griya-ayu-pwa-v3';
 const OFFLINE_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/icon.svg',
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icon-192.png',
   '/pwa-192x192.png',
   '/pwa-512x512.png',
   '/apple-touch-icon.png'
@@ -61,3 +64,64 @@ self.addEventListener('fetch', (event) => {
       })
   );
 });
+
+// Listener saat ada event push ke Service Worker
+self.addEventListener('push', (event) => {
+  let payload = {
+    title: 'Booking Baru Masuk! 💆',
+    body: 'Ada pemberitahuan booking baru di Griya Ayu Sport Massage & SPA.',
+    icon: '/icon-192.png',
+    vibrate: [200, 100, 200],
+    data: { url: '/?view=booking' }
+  };
+
+  if (event.data) {
+    try {
+      const parsed = event.data.json();
+      payload = { ...payload, ...parsed };
+    } catch {
+      payload.body = event.data.text() || payload.body;
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: payload.icon || '/icon-192.png',
+      badge: '/icon-192.png',
+      vibrate: payload.vibrate || [200, 100, 200],
+      data: payload.data || { url: '/?view=booking' }
+    })
+  );
+});
+
+// Listener notificationclick: saat notifikasi di layar HP ditekan, langsung buka/fokus halaman dashboard admin/booking
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl =
+    (event.notification &&
+      event.notification.data &&
+      event.notification.data.url) ||
+    '/?view=booking';
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if ('focus' in client) {
+            client.postMessage({
+              type: 'NOTIFICATION_CLICK_BOOKING',
+              data: event.notification.data || {}
+            });
+            return client.focus();
+          }
+        }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(targetUrl);
+        }
+        return undefined;
+      })
+  );
+});
+

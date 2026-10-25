@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   User,
   BookingOrder,
@@ -6,6 +6,8 @@ import {
   Language,
   AppNotification,
   PointReward,
+  ServiceItem,
+  ServiceGridCategory,
 } from '../types/index.ts';
 import {
   formatRupiah,
@@ -23,7 +25,13 @@ import {
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
 } from '../utils/spaLogic.ts';
-import { PROMO_TEMPLATES, INITIAL_USERS, POINT_REWARDS } from '../data/mockData.ts';
+import {
+  PROMO_TEMPLATES,
+  INITIAL_USERS,
+  POINT_REWARDS,
+  SINGLE_CATALOG,
+  PACKAGE_CATALOG,
+} from '../data/mockData.ts';
 import { AccountPanel } from './AccountPanel.tsx';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
@@ -34,6 +42,8 @@ interface AdminDashboardProps {
   notifications: AppNotification[];
   masterTimeSlots: TimeSlot[];
   pointRewards?: PointReward[];
+  singleServices?: ServiceItem[];
+  packageServices?: ServiceItem[];
   closedWeekdays: number[];
   closedSpecificDates: string[];
   language: Language;
@@ -41,10 +51,21 @@ interface AdminDashboardProps {
   onUpdateUser: (updated: User) => void;
   onUpdateCustomerAccount?: (updated: User) => void;
   onUpdatePointRewards?: (nextRewards: PointReward[]) => void;
+  onUpdateServices?: (
+    nextSingleServices: ServiceItem[],
+    nextPackageServices: ServiceItem[]
+  ) => void;
   onVerifyPayment: (orderId: number) => void;
   onCompleteTreatment: (orderId: number) => void;
   onApproveRefund: (orderId: number) => void;
   onRejectRefund: (orderId: number, rejectReason?: string) => void;
+  onUpdateBookingProof?: (
+    orderId: number,
+    proofImage: string,
+    paymentChannel?: string
+  ) => void;
+  onRejectFakePayment?: (orderId: number, reason: string) => void;
+  onDeleteBooking?: (orderId: number) => void;
   onToggleWeekdayHoliday: (dayIdx: number) => void;
   onToggleCustomHolidayDate: (dateIso: string) => void;
   onRemoveSpecificHoliday: (dateIso: string) => void;
@@ -70,6 +91,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   notifications,
   masterTimeSlots,
   pointRewards,
+  singleServices,
+  packageServices,
   closedWeekdays,
   closedSpecificDates,
   language,
@@ -77,10 +100,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateUser,
   onUpdateCustomerAccount,
   onUpdatePointRewards,
+  onUpdateServices,
   onVerifyPayment,
   onCompleteTreatment,
   onApproveRefund,
   onRejectRefund,
+  onUpdateBookingProof,
+  onRejectFakePayment,
+  onDeleteBooking,
   onToggleWeekdayHoliday,
   onToggleCustomHolidayDate,
   onRemoveSpecificHoliday,
@@ -95,19 +122,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const isEn = language === 'en';
   const [adminSubTab, setAdminSubTab] = useState<
-    'orders' | 'notifications' | 'rewards' | 'schedule' | 'account'
+    'orders' | 'services' | 'notifications' | 'rewards' | 'schedule' | 'account'
   >('orders');
   const [orderFilter, setOrderFilter] = useState<
     'new_incoming' | 'all' | 'refund_pending' | 'active' | 'refund_done'
   >('new_incoming');
+
+  useEffect(() => {
+    const handleOpenBookingFromNotif = () => {
+      setAdminSubTab('orders');
+      setOrderFilter('new_incoming');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    window.addEventListener('griya-open-booking-dashboard', handleOpenBookingFromNotif);
+    return () => {
+      window.removeEventListener('griya-open-booking-dashboard', handleOpenBookingFromNotif);
+    };
+  }, []);
   const [customDateInput, setCustomDateInput] = useState<string>(() => getTodayIso());
   const [newSlotTimeInput, setNewSlotTimeInput] = useState<string>('20:30');
   const [expandedConfirmOrderId, setExpandedConfirmOrderId] = useState<number | null>(null);
   const [previewProofOrder, setPreviewProofOrder] = useState<BookingOrder | null>(null);
+  const [proofZoomLevel, setProofZoomLevel] = useState<number>(1);
+  const [confirmRejectFakeId, setConfirmRejectFakeId] = useState<number | null>(null);
+  const [fakePaymentReason, setFakePaymentReason] = useState<string>(
+    'Struk screenshot tidak sesuai / dana belum masuk di mutasi rekening resmi Griya Ayu.'
+  );
   const [rejectingOrderId, setRejectingOrderId] = useState<number | null>(null);
   const [rejectReasonInput, setRejectReasonInput] = useState<string>(
     'Bukti pembayaran tidak ditemukan pada mutasi rekening atau tidak sesuai.'
   );
+  const [confirmDeleteOrderId, setConfirmDeleteOrderId] = useState<number | null>(null);
+
+  const handleOpenProofInspector = (order: BookingOrder) => {
+    setProofZoomLevel(1);
+    setConfirmRejectFakeId(null);
+    setPreviewProofOrder(order);
+  };
+
+  const handleAdminUploadProofForOrder = async (
+    order: BookingOrder,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file || !onUpdateBookingProof) return;
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      onUpdateBookingProof(order.id, compressed, order.paymentChannel || order.payMethod);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          onUpdateBookingProof(order.id, reader.result, order.paymentChannel || order.payMethod);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   // State Laporan Keuangan Bulanan
   const [selectedMonthPrefix, setSelectedMonthPrefix] = useState<string>(() =>
@@ -459,6 +530,313 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   };
 
+  // =========================================================================
+  // STATE & HANDLER KELOLA LAYANAN SPORT MASSAGE & SPA (TAMBAH / EDIT / HAPUS)
+  // =========================================================================
+  const managedSingleServices = React.useMemo(
+    () => (singleServices && singleServices.length > 0 ? singleServices : SINGLE_CATALOG),
+    [singleServices]
+  );
+  const managedPackageServices = React.useMemo(
+    () =>
+      packageServices && Array.isArray(packageServices)
+        ? packageServices
+        : PACKAGE_CATALOG,
+    [packageServices]
+  );
+
+  const [serviceTabMode, setServiceTabMode] = useState<'single' | 'package'>('single');
+  const [serviceCategoryFilter, setServiceCategoryFilter] = useState<
+    'all' | 'sport' | 'wellness' | ServiceGridCategory
+  >('all');
+  const [serviceSearchQuery, setServiceSearchQuery] = useState<string>('');
+  const [serviceModalOpen, setServiceModalOpen] = useState<boolean>(false);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [editingServiceOrigType, setEditingServiceOrigType] = useState<'single' | 'package'>('single');
+
+  const [serviceTypeInput, setServiceTypeInput] = useState<'single' | 'package'>('single');
+  const [serviceCategoryInput, setServiceCategoryInput] = useState<'sport' | 'wellness'>('sport');
+  const [serviceNameInput, setServiceNameInput] = useState<string>('');
+  const [serviceDurationInput, setServiceDurationInput] = useState<string>('60 Menit');
+  const [servicePriceInput, setServicePriceInput] = useState<string>('150000');
+  const [serviceNormalPriceInput, setServiceNormalPriceInput] = useState<string>('');
+  const [servicePointsInput, setServicePointsInput] = useState<string>('10');
+  const [serviceTagInput, setServiceTagInput] = useState<string>('');
+  const [serviceDescInput, setServiceDescInput] = useState<string>('');
+  const [serviceGenderInput, setServiceGenderInput] = useState<'all' | 'female' | 'male'>('all');
+  const [serviceGridCatsInput, setServiceGridCatsInput] = useState<ServiceGridCategory[]>([
+    'kebugaran',
+  ]);
+  const [serviceHasInjurySpotsInput, setServiceHasInjurySpotsInput] = useState<boolean>(false);
+  const [serviceAvailableInput, setServiceAvailableInput] = useState<boolean>(true);
+  const [serviceFormError, setServiceFormError] = useState<string>('');
+  const [deletingServiceId, setDeletingServiceId] = useState<string | null>(null);
+  const [confirmResetServices, setConfirmResetServices] = useState<boolean>(false);
+
+  const GRID_CATEGORY_OPTIONS: Array<{
+    id: ServiceGridCategory;
+    label: string;
+    icon: string;
+  }> = [
+    { id: 'kebugaran', label: 'Pijat Kebugaran', icon: 'fa-hands-holding-circle' },
+    { id: 'otot_cedera', label: 'Terapi Otot & Cedera', icon: 'fa-person-running' },
+    { id: 'spa_tubuh', label: 'Spa Perawatan Tubuh', icon: 'fa-spa' },
+    { id: 'bekam', label: 'Terapi Bekam', icon: 'fa-heart-pulse' },
+    { id: 'khusus_wanita', label: 'Khusus Wanita', icon: 'fa-venus' },
+  ];
+
+  const handleOpenAddServiceModal = (defaultType: 'single' | 'package' = serviceTabMode) => {
+    setEditingServiceId(null);
+    setEditingServiceOrigType(defaultType);
+    setServiceTypeInput(defaultType);
+    setServiceCategoryInput('sport');
+    setServiceNameInput('');
+    setServiceDurationInput(defaultType === 'package' ? '120 Menit' : '60 Menit');
+    setServicePriceInput(defaultType === 'package' ? '400000' : '150000');
+    setServiceNormalPriceInput(defaultType === 'package' ? '450000' : '');
+    setServicePointsInput(defaultType === 'package' ? '20' : '10');
+    setServiceTagInput(defaultType === 'package' ? 'Paket Hemat Spesial' : 'Terapi Unggulan');
+    setServiceDescInput('');
+    setServiceGenderInput('all');
+    setServiceGridCatsInput(['kebugaran']);
+    setServiceHasInjurySpotsInput(false);
+    setServiceAvailableInput(true);
+    setServiceFormError('');
+    setServiceModalOpen(true);
+  };
+
+  const handleOpenEditServiceModal = (item: ServiceItem, type: 'single' | 'package') => {
+    setEditingServiceId(item.id);
+    setEditingServiceOrigType(type);
+    setServiceTypeInput(type);
+    setServiceCategoryInput(
+      item.category || (item.gender === 'female' ? 'wellness' : 'sport')
+    );
+    setServiceNameInput(item.name);
+    setServiceDurationInput(item.duration || '60 Menit');
+    setServicePriceInput(String(item.price));
+    setServiceNormalPriceInput(item.normalPrice ? String(item.normalPrice) : '');
+    setServicePointsInput(String(item.points));
+    setServiceTagInput(item.tag || '');
+    setServiceDescInput(item.desc || '');
+    setServiceGenderInput(item.gender || 'all');
+    setServiceGridCatsInput(
+      item.gridCategories && item.gridCategories.length > 0
+        ? item.gridCategories
+        : item.gender === 'female'
+        ? ['khusus_wanita']
+        : ['kebugaran']
+    );
+    setServiceHasInjurySpotsInput(
+      Boolean(item.hasInjurySpots || item.id === 's2' || item.id === 's4')
+    );
+    setServiceAvailableInput(item.available !== false);
+    setServiceFormError('');
+    setServiceModalOpen(true);
+  };
+
+  const toggleGridCatInput = (cat: ServiceGridCategory) => {
+    setServiceGridCatsInput((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const handleSaveServiceForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = serviceNameInput.trim();
+    const cleanDuration = serviceDurationInput.trim() || '60 Menit';
+    const parsedPrice = Math.floor(Number(servicePriceInput));
+    const parsedNormalPrice = serviceNormalPriceInput.trim()
+      ? Math.floor(Number(serviceNormalPriceInput))
+      : undefined;
+    const parsedPoints = Math.max(0, Math.floor(Number(servicePointsInput) || 0));
+    const cleanTag =
+      serviceTagInput.trim() ||
+      (serviceCategoryInput === 'sport' ? 'Sport Massage' : 'SPA & Wellness');
+    const cleanDesc =
+      serviceDescInput.trim() ||
+      `Layanan ${cleanName} (${cleanDuration}) oleh terapis profesional Griya Ayu.`;
+
+    if (!cleanName) {
+      setServiceFormError('Mohon isi Nama Layanan terlebih dahulu.');
+      return;
+    }
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      setServiceFormError('Harga layanan (Rp) harus berupa angka lebih dari 0.');
+      return;
+    }
+
+    const genderBadge =
+      serviceGenderInput === 'female'
+        ? '👩 Khusus Wanita'
+        : serviceGenderInput === 'male'
+        ? '👨 Khusus Pria'
+        : '👨👩 Semua Gender';
+
+    const resolvedGridCats: ServiceGridCategory[] =
+      serviceGridCatsInput.length > 0
+        ? serviceGridCatsInput
+        : serviceGenderInput === 'female'
+        ? ['khusus_wanita']
+        : ['kebugaran'];
+
+    const servicePayload: ServiceItem = {
+      id:
+        editingServiceId ||
+        `${serviceTypeInput === 'package' ? 'pkg' : serviceCategoryInput === 'sport' ? 's' : 'w'}_${Date.now()}`,
+      name: cleanName,
+      duration: cleanDuration,
+      price: parsedPrice,
+      normalPrice:
+        parsedNormalPrice && parsedNormalPrice > parsedPrice ? parsedNormalPrice : undefined,
+      points: parsedPoints,
+      tag: cleanTag,
+      desc: cleanDesc,
+      category: serviceCategoryInput,
+      gender: serviceGenderInput,
+      genderBadge,
+      gridCategories: resolvedGridCats,
+      available: serviceAvailableInput,
+      hasInjurySpots: serviceTypeInput === 'single' ? serviceHasInjurySpotsInput : false,
+    };
+
+    let nextSingle = [...managedSingleServices];
+    let nextPackage = [...managedPackageServices];
+
+    if (editingServiceId) {
+      if (editingServiceOrigType === serviceTypeInput) {
+        if (serviceTypeInput === 'single') {
+          nextSingle = nextSingle.map((s) =>
+            s.id === editingServiceId ? servicePayload : s
+          );
+        } else {
+          nextPackage = nextPackage.map((p) =>
+            p.id === editingServiceId ? servicePayload : p
+          );
+        }
+      } else {
+        // Pindah dari Satuan ke Paket atau sebaliknya
+        if (editingServiceOrigType === 'single') {
+          nextSingle = nextSingle.filter((s) => s.id !== editingServiceId);
+          nextPackage = [...nextPackage, servicePayload];
+        } else {
+          nextPackage = nextPackage.filter((p) => p.id !== editingServiceId);
+          nextSingle = [...nextSingle, servicePayload];
+        }
+      }
+      if (onUpdateServices) {
+        onUpdateServices(nextSingle, nextPackage);
+      }
+      setServiceTabMode(serviceTypeInput);
+      setServiceModalOpen(false);
+      onShowToast(
+        'Layanan Berhasil Diperbarui! ✨',
+        `Layanan "${cleanName}" (${formatRupiah(parsedPrice)} • ${cleanDuration}) telah disimpan dan langsung terbarui di halaman pelanggan.`
+      );
+    } else {
+      if (serviceTypeInput === 'single') {
+        nextSingle = [servicePayload, ...nextSingle];
+      } else {
+        nextPackage = [servicePayload, ...nextPackage];
+      }
+      if (onUpdateServices) {
+        onUpdateServices(nextSingle, nextPackage);
+      }
+      setServiceTabMode(serviceTypeInput);
+      setServiceModalOpen(false);
+      onShowToast(
+        'Layanan Baru Ditambahkan! 💆‍♀️✨',
+        `Layanan "${cleanName}" (${formatRupiah(parsedPrice)} • ${cleanDuration} • +${parsedPoints} Poin) berhasil ditambahkan ke daftar layanan pelanggan.`
+      );
+    }
+  };
+
+  const handleToggleServiceAvailability = (
+    item: ServiceItem,
+    type: 'single' | 'package'
+  ) => {
+    const nextAvailable = item.available === false ? true : false;
+    const nextSingle =
+      type === 'single'
+        ? managedSingleServices.map((s) =>
+            s.id === item.id ? { ...s, available: nextAvailable } : s
+          )
+        : managedSingleServices;
+    const nextPackage =
+      type === 'package'
+        ? managedPackageServices.map((p) =>
+            p.id === item.id ? { ...p, available: nextAvailable } : p
+          )
+        : managedPackageServices;
+
+    if (onUpdateServices) {
+      onUpdateServices(nextSingle, nextPackage);
+    }
+    onShowToast(
+      nextAvailable ? 'Layanan Diaktifkan Kembali ✓' : 'Layanan Dinonaktifkan Sementara',
+      nextAvailable
+        ? `Layanan "${item.name}" kini aktif dan tampil kembali di katalog booking pelanggan.`
+        : `Layanan "${item.name}" dinonaktifkan dan otomatis disembunyikan dari halaman booking pelanggan.`
+    );
+  };
+
+  const handleConfirmDeleteService = (item: ServiceItem, type: 'single' | 'package') => {
+    const nextSingle =
+      type === 'single'
+        ? managedSingleServices.filter((s) => s.id !== item.id)
+        : managedSingleServices;
+    const nextPackage =
+      type === 'package'
+        ? managedPackageServices.filter((p) => p.id !== item.id)
+        : managedPackageServices;
+
+    if (onUpdateServices) {
+      onUpdateServices(nextSingle, nextPackage);
+    }
+    setDeletingServiceId(null);
+    onShowToast(
+      'Layanan Berhasil Dihapus 🗑️',
+      `Layanan "${item.name}" (${formatRupiah(item.price)}) telah dihapus dari daftar katalog layanan.`
+    );
+  };
+
+  const handleResetServicesToDefault = () => {
+    if (onUpdateServices) {
+      onUpdateServices(SINGLE_CATALOG, PACKAGE_CATALOG);
+    }
+    setConfirmResetServices(false);
+    onShowToast(
+      'Katalog Layanan Direset ke Default ✓',
+      'Seluruh daftar layanan Sport Massage, SPA & Paket Hemat telah dikembalikan ke daftar bawaan Griya Ayu.'
+    );
+  };
+
+  const currentServiceList =
+    serviceTabMode === 'single' ? managedSingleServices : managedPackageServices;
+
+  const filteredManagedServices = currentServiceList.filter((item) => {
+    if (serviceCategoryFilter === 'sport') {
+      if (item.category && item.category !== 'sport') return false;
+      if (!item.category && item.gender === 'female') return false;
+    } else if (serviceCategoryFilter === 'wellness') {
+      if (item.category && item.category !== 'wellness') return false;
+      if (!item.category && item.gender !== 'female') return false;
+    } else if (serviceCategoryFilter !== 'all') {
+      if (!item.gridCategories?.includes(serviceCategoryFilter)) return false;
+    }
+
+    if (serviceSearchQuery.trim()) {
+      const q = serviceSearchQuery.trim().toLowerCase();
+      return (
+        item.name.toLowerCase().includes(q) ||
+        (item.desc || '').toLowerCase().includes(q) ||
+        (item.tag || '').toLowerCase().includes(q) ||
+        (item.duration || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   return (
     <div className="flex-1 flex flex-col pb-28">
       {/* HEADER DASHBOARD ADMIN RISMAWATI */}
@@ -774,8 +1152,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             ✓ Selesai (+{b.ptsEarned} Pts)
                           </span>
                         )}
+
+                        {onDeleteBooking && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmDeleteOrderId(
+                                confirmDeleteOrderId === b.id ? null : b.id
+                              )
+                            }
+                            title="Hapus pesanan ini (pelanggan iseng / asal booking)"
+                            className={`tactile-btn px-2 py-1 rounded-lg text-[10px] font-black border flex items-center gap-1 transition ${
+                              confirmDeleteOrderId === b.id
+                                ? 'bg-red-600 text-white border-red-700'
+                                : 'bg-red-50 hover:bg-red-100 text-red-700 border-red-200'
+                            }`}
+                          >
+                            <i className="fa-solid fa-trash-can text-[10px]"></i>
+                            <span>Hapus</span>
+                          </button>
+                        )}
                       </div>
                     </div>
+
+                    {/* Panel Konfirmasi Hapus Pesanan Baru / Pesanan Iseng */}
+                    {onDeleteBooking && confirmDeleteOrderId === b.id && (
+                      <div className="bg-red-50 border-2 border-red-400 rounded-xl p-2.5 space-y-2 animate-fade">
+                        <div className="flex items-start gap-2">
+                          <div className="w-6 h-6 rounded-lg bg-red-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                            <i className="fa-solid fa-trash-can text-xs"></i>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-black text-red-950 leading-tight">
+                              Hapus Permanen Pesanan #{`GA-${String(b.id).slice(-6)}`}?
+                            </p>
+                            <p className="text-[11px] text-red-800 leading-snug mt-0.5">
+                              Pesanan <b>{b.customer}</b> ({b.datePretty} • Jam <b>{b.time} WIB</b>) akan dihapus permanen agar tidak menumpuk, dan slot jam <b>{b.time} WIB</b> otomatis dibuka kembali.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteBooking(b.id);
+                              setConfirmDeleteOrderId(null);
+                            }}
+                            className="tactile-btn bg-red-600 hover:bg-red-700 text-white font-black py-2 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1.5 shadow-2xs"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                            <span>Ya, Hapus Permanen</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteOrderId(null)}
+                            className="tactile-btn bg-white hover:bg-stone-100 text-stone-700 font-bold py-2 px-2.5 rounded-lg text-[11px] border border-stone-300"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Detail Pelanggan, Layanan, & Jadwal (Ukuran Font Jelas & Mudah Dibaca) */}
                     <div className="space-y-1">
@@ -797,20 +1234,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </p>
                     </div>
 
-                    {/* Info Metode Pembayaran, Bukti Transfer/QRIS atau Keterangan Cash, & Struk */}
-                    <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 space-y-2 text-xs">
-                      <div className="flex justify-between items-center gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs text-stone-700 font-bold truncate">{b.payMethod}</p>
+                    {/* Info Metode Pembayaran, Pembayaran Melalui Apa, & Struk Screenshot Pelanggan */}
+                    <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 space-y-2.5 text-xs">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-black uppercase tracking-wide text-stone-500">
+                              Pembayaran Melalui:
+                            </span>
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                                isCashOrder
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : b.payMethodType === 'qris'
+                                  ? 'bg-cyan-100 text-cyan-950 border border-cyan-300'
+                                  : 'bg-indigo-100 text-indigo-950 border border-indigo-300'
+                              }`}
+                            >
+                              {isCashOrder
+                                ? '💵 CASH / DI TEMPAT'
+                                : b.payMethodType === 'qris'
+                                ? '📱 QRIS ONLINE'
+                                : '🏦 TRANSFER BANK'}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-[#0B261C] font-black leading-snug">
+                            {b.paymentChannel || b.payMethod}
+                          </p>
+
                           {b.vaNumber && (
-                            <p className="text-[11px] font-mono text-stone-500 truncate">
-                              ID/VA: {b.vaNumber}
+                            <p className="text-[11px] font-mono text-stone-600 leading-snug">
+                              {b.payMethodType === 'qris'
+                                ? `NMID Tujuan: ${b.vaNumber}`
+                                : isCashOrder
+                                ? b.vaNumber
+                                : `Rekening Tujuan: ${b.vaNumber}`}
                             </p>
                           )}
-                          <p className="font-black text-emerald-950 text-sm mt-0.5">
-                            {formatRupiah(b.total)}
+
+                          <p className="font-black text-emerald-950 text-sm pt-0.5">
+                            Total Tagihan: {formatRupiah(b.total)}
                           </p>
                         </div>
+
                         <button
                           type="button"
                           onClick={() => onViewReceipt(b)}
@@ -821,7 +1288,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </button>
                       </div>
 
-                      {/* TAMPILAN BUKTI PEMBAYARAN (QRIS/TRANSFER) ATAU KETERANGAN CASH DI TEMPAT */}
+                      {/* TAMPILAN STRUK SCREENSHOT PEMBAYARAN ONLINE (QRIS/TRANSFER) ATAU KETERANGAN CASH DI TEMPAT */}
                       {isCashOrder ? (
                         <div className="bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-2 flex items-center justify-between gap-2 flex-wrap text-xs font-black text-amber-950">
                           <span>💵 Bayar di Tempat (Cash)</span>
@@ -829,39 +1296,113 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             Dibayar di Kasir Saat Kedatangan
                           </span>
                         </div>
-                      ) : b.paymentProofImage ? (
-                        <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
+                      ) : b.paymentProofImage || b.refundRequest?.proofImage ? (
+                        <div className="bg-white p-3 rounded-xl border-2 border-emerald-400 space-y-2 shadow-2xs">
                           <div className="flex justify-between items-center gap-2 flex-wrap">
-                            <span className="text-xs font-black text-[#0B261C] flex items-center gap-1">
-                              <i className="fa-solid fa-image text-emerald-700"></i>
-                              <span>Bukti Transfer / QRIS Pelanggan:</span>
+                            <span className="text-xs font-black text-[#0B261C] flex items-center gap-1.5">
+                              <i className="fa-solid fa-camera-retro text-emerald-700"></i>
+                              <span>Struk Screenshot Pembayaran Pelanggan:</span>
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => setPreviewProofOrder(b)}
-                              className="text-xs font-black text-emerald-800 underline"
-                            >
-                              Perbesar Foto Bukti
-                            </button>
+                            <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded-md">
+                              ✓ Terlampir • Siap Dicek
+                            </span>
                           </div>
+
+                          <div className="bg-emerald-50/70 border border-emerald-200 rounded-lg px-2.5 py-1.5 text-[11px] flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-stone-600 font-bold">Dibayar Melalui:</span>
+                            <span className="font-black text-[#0B261C]">
+                              {b.paymentChannel || b.payMethod}
+                            </span>
+                          </div>
+
                           <div
-                            onClick={() => setPreviewProofOrder(b)}
-                            className="relative h-28 w-full rounded-lg overflow-hidden bg-stone-900 border border-stone-300 cursor-pointer"
+                            onClick={() => handleOpenProofInspector(b)}
+                            className="relative h-40 w-full rounded-xl overflow-hidden bg-stone-950 border border-stone-300 cursor-pointer group"
                           >
                             <img
-                              src={b.paymentProofImage}
-                              alt={`Bukti Bayar ${b.customer}`}
+                              src={b.paymentProofImage || b.refundRequest?.proofImage}
+                              alt={`Struk Screenshot Pembayaran ${b.customer}`}
                               className="w-full h-full object-contain"
                             />
-                            <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[10px] font-bold px-2 py-0.5 rounded">
-                              🔍 Klik untuk Perbesar Bukti
-                            </span>
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-2 flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-white">
+                                Klik foto untuk Zoom & Cek Asli/Palsu
+                              </span>
+                              <span className="bg-[#D4AF37] text-[#0B261C] text-[10px] font-black px-2 py-0.5 rounded-md">
+                                🔍 Perbesar Struk
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenProofInspector(b)}
+                              className="tactile-btn bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-2 px-3 rounded-xl text-xs border border-[#D4AF37]/50 flex items-center justify-center gap-1.5"
+                            >
+                              <i className="fa-solid fa-magnifying-glass-plus"></i>
+                              <span>Cek Asli / Palsu (Zoom)</span>
+                            </button>
+
+                            <label className="tactile-btn bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold py-2 px-3 rounded-xl text-xs border border-stone-300 flex items-center justify-center gap-1.5 cursor-pointer text-center">
+                              <i className="fa-solid fa-camera"></i>
+                              <span>Update Foto Bukti</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleAdminUploadProofForOrder(b, e)}
+                                className="hidden"
+                              />
+                            </label>
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs text-stone-600 flex items-center justify-between gap-2">
-                          <span>Metode: QRIS / Transfer Bank</span>
-                          <span className="font-bold text-emerald-800">Cek Mutasi / Struk</span>
+                        <div className="bg-amber-50/90 border-2 border-dashed border-amber-400 rounded-xl p-2.5 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <span className="text-xs font-black text-amber-950 flex items-center gap-1">
+                                <i className="fa-solid fa-triangle-exclamation text-amber-700"></i>
+                                <span>Belum Ada Lampiran Struk Screenshot</span>
+                              </span>
+                              <p className="text-[11px] text-stone-600 leading-snug">
+                                Metode: <b>{b.paymentChannel || b.payMethod}</b>. Silakan minta screenshot bukti transfer ke WA pelanggan atau lampirkan foto bukti di bawah:
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <a
+                              href={`https://wa.me/${
+                                b.wa.replace(/[^0-9]/g, '').startsWith('0')
+                                  ? '62' + b.wa.replace(/[^0-9]/g, '').slice(1)
+                                  : b.wa.replace(/[^0-9]/g, '')
+                              }?text=${encodeURIComponent(
+                                `Halo Kak *${b.customer}*, kami dari *Admin Griya Ayu Sport Massage & Spa*.\n\nMohon kirimkan *foto screenshot bukti pembayaran* untuk booking *#GA-${String(
+                                  b.id
+                                ).slice(-6)}* (${b.paymentChannel || b.payMethod} • ${formatRupiah(
+                                  b.total
+                                )}) pada jadwal *${b.datePretty} Jam ${
+                                  b.time
+                                } WIB* untuk verifikasi mutasi kami ya. Terima kasih 🙏`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="tactile-btn bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5 text-center"
+                            >
+                              <i className="fa-brands fa-whatsapp"></i>
+                              <span>Minta Screenshot WA</span>
+                            </a>
+
+                            <label className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black py-2 px-2.5 rounded-xl text-[11px] border border-[#D4AF37]/50 flex items-center justify-center gap-1.5 cursor-pointer text-center">
+                              <i className="fa-solid fa-upload"></i>
+                              <span>Lampirkan Screenshot</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => handleAdminUploadProofForOrder(b, e)}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1172,6 +1713,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         )}
                       </div>
                     )}
+
+                    {/* Tombol Hapus Pesanan di Bagian Bawah Kartu (Untuk Pelanggan Iseng / Asal Booking) */}
+                    {onDeleteBooking && confirmDeleteOrderId !== b.id && (
+                      <div className="pt-1 border-t border-stone-100 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteOrderId(b.id)}
+                          className="tactile-btn text-[11px] font-extrabold text-red-700 hover:text-red-800 bg-red-50/80 hover:bg-red-100 border border-red-200/90 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition"
+                        >
+                          <i className="fa-solid fa-trash-can text-[10px]"></i>
+                          <span>Hapus Pesanan (Pelanggan Asal Booking / Batal)</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -1179,53 +1734,205 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* MODAL PREVIEW FOTO BUKTI PEMBAYARAN PELANGGAN (BOOKING / REFUND) */}
+        {/* MODAL INSPEKSI & CEK KEASLIAN STRUK SCREENSHOT PEMBAYARAN PELANGGAN (ZOOM 1X - 3X) */}
         {previewProofOrder &&
           (previewProofOrder.paymentProofImage || previewProofOrder.refundRequest?.proofImage) && (
             <div
               role="dialog"
               aria-modal="true"
-              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade"
+              aria-label="Inspeksi Keaslian Struk Screenshot Pembayaran Pelanggan"
+              className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xs flex items-center justify-center p-3 animate-fade"
               onClick={() => setPreviewProofOrder(null)}
             >
               <div
-                className="bg-white w-full max-w-sm rounded-3xl p-4 space-y-3 shadow-2xl border-2 border-[#D4AF37]"
+                className="bg-[#F9F6F0] w-full max-w-md max-h-[94vh] overflow-y-auto rounded-3xl p-4 space-y-3 shadow-2xl border-2 border-[#D4AF37]"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="text-[9px] font-black uppercase bg-amber-100 text-amber-900 px-2 py-0.5 rounded">
-                      Bukti Pembayaran Pelanggan ({previewProofOrder.payMethod})
+                {/* Header Inspeksi Bukti */}
+                <div className="flex justify-between items-start gap-2 border-b border-stone-200 pb-2.5">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] font-black uppercase bg-[#0B261C] text-[#D4AF37] px-2.5 py-0.5 rounded-md inline-flex items-center gap-1">
+                      <i className="fa-solid fa-shield-halved"></i>
+                      <span>Cek Keaslian Struk Screenshot Pembayaran</span>
                     </span>
-                    <h3 className="text-xs font-black text-[#0B261C] mt-0.5">
-                      {previewProofOrder.customer} • {formatRupiah(previewProofOrder.total)}
+                    <h3 className="text-sm font-black text-[#0B261C] mt-1">
+                      {previewProofOrder.customer} ({previewProofOrder.wa})
                     </h3>
+                    <p className="text-xs font-bold text-stone-600">
+                      Order #GA-{String(previewProofOrder.id).slice(-6)} • Jadwal{' '}
+                      {previewProofOrder.datePretty} ({previewProofOrder.time} WIB)
+                    </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setPreviewProofOrder(null)}
-                    className="w-8 h-8 rounded-full bg-stone-100 text-stone-700 font-black text-xs"
+                    className="w-8 h-8 rounded-full bg-stone-200 hover:bg-stone-300 text-stone-800 font-black text-xs shrink-0"
                   >
                     ✕
                   </button>
                 </div>
-                <div className="max-h-[65vh] overflow-y-auto rounded-2xl border border-stone-200 bg-stone-950">
+
+                {/* Kotak Rincian Pembayaran Melalui Apa & Parameter Cek Asli/Palsu */}
+                <div className="bg-white p-3 rounded-2xl border border-stone-200 space-y-1.5 text-xs">
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="text-stone-500 font-bold shrink-0">Pembayaran Melalui:</span>
+                    <span className="font-black text-[#0B261C] text-right">
+                      {previewProofOrder.paymentChannel || previewProofOrder.payMethod}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="text-stone-500 font-bold shrink-0"> Kategori Metode:</span>
+                    <span className="font-extrabold text-emerald-900 text-right">
+                      {previewProofOrder.payMethodType === 'qris'
+                        ? 'QRIS Resmi Griya Ayu (NMID: ID1026618031821)'
+                        : 'Transfer Rekening Resmi (a.n. KARTINI)'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-stone-100">
+                    <span className="text-stone-500 font-bold">Nominal Wajib Sesuai:</span>
+                    <span className="font-black text-sm text-emerald-900 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      {formatRupiah(previewProofOrder.total)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-stone-500 font-bold">Waktu Input Booking:</span>
+                    <span className="font-bold text-stone-700">{previewProofOrder.createdAt}</span>
+                  </div>
+                </div>
+
+                {/* Panduan Singkat Cek Asli atau Palsu */}
+                <div className="bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-[11px] text-amber-950 space-y-1">
+                  <span className="font-black block">
+                    🔎 Panduan Cek Struk Asli vs Palsu:
+                  </span>
+                  <p className="leading-snug text-stone-700">
+                    Gunakan tombol <b>Zoom (1x–3x)</b> di bawah untuk memeriksa: <b>(1) Nominal {formatRupiah(previewProofOrder.total)}</b>, <b>(2) Nama Penerima ADMIN GRIYA AYU SPA / KARTINI</b>, <b>(3) Jam & Tanggal Transaksi</b>, dan <b>(4) Mutasi Masuk</b>.
+                  </p>
+                </div>
+
+                {/* Kontrol Zoom Gambar (1x, 1.5x, 2x, 2.5x, 3x) */}
+                <div className="flex items-center justify-between gap-1.5 bg-stone-900 text-white px-3 py-2 rounded-xl text-xs font-black">
+                  <span className="text-[11px] text-[#D4AF37]">Zoom Struk:</span>
+                  <div className="flex items-center gap-1">
+                    {[1, 1.5, 2, 2.5, 3].map((z) => (
+                      <button
+                        key={z}
+                        type="button"
+                        onClick={() => setProofZoomLevel(z)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] transition ${
+                          proofZoomLevel === z
+                            ? 'bg-[#D4AF37] text-[#0B261C]'
+                            : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                        }`}
+                      >
+                        {z}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Area Gambar Screenshot yang Bisa Di-Zoom & Di-Scroll */}
+                <div className="max-h-[52vh] overflow-auto rounded-2xl border-2 border-stone-800 bg-stone-950 p-2 flex items-center justify-center">
                   <img
                     src={
-                      previewProofOrder.refundRequest?.proofImage ||
-                      previewProofOrder.paymentProofImage
+                      previewProofOrder.paymentProofImage ||
+                      previewProofOrder.refundRequest?.proofImage
                     }
-                    alt="Bukti Transfer Pelanggan"
-                    className="w-full h-auto object-contain"
+                    alt="Struk Screenshot Pembayaran Pelanggan"
+                    style={{
+                      transform: `scale(${proofZoomLevel})`,
+                      transformOrigin: 'top center',
+                    }}
+                    className="w-full h-auto object-contain transition-transform duration-150"
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setPreviewProofOrder(null)}
-                  className="tactile-btn w-full bg-[#0B261C] text-[#D4AF37] font-black py-2.5 rounded-xl text-xs"
-                >
-                  Tutup Preview Bukti
-                </button>
+
+                {/* Tombol Verifikasi Asli / Tolak jika Bukti Palsu */}
+                {confirmRejectFakeId === previewProofOrder.id ? (
+                  <div className="bg-red-50 border-2 border-red-300 rounded-2xl p-3 space-y-2">
+                    <label className="text-xs font-black text-red-900 block">
+                      Alasan Penolakan (Struk Palsu / Dana Tidak Masuk Mutasi):
+                    </label>
+                    <input
+                      type="text"
+                      value={fakePaymentReason}
+                      onChange={(e) => setFakePaymentReason(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-red-300 bg-white text-xs font-bold text-stone-900"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRejectFakeId(null)}
+                        className="tactile-btn bg-stone-200 text-stone-800 font-bold py-2 px-3 rounded-xl text-xs"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onRejectFakePayment) {
+                            onRejectFakePayment(previewProofOrder.id, fakePaymentReason);
+                          }
+                          setConfirmRejectFakeId(null);
+                          setPreviewProofOrder(null);
+                        }}
+                        className="tactile-btn flex-1 bg-amber-600 hover:bg-amber-700 text-white font-black py-2 px-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                      >
+                        <i className="fa-solid fa-ban"></i>
+                        <span>Tolak & Batalkan</span>
+                      </button>
+                    </div>
+                    {onDeleteBooking && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDeleteBooking(previewProofOrder.id);
+                          setConfirmRejectFakeId(null);
+                          setPreviewProofOrder(null);
+                        }}
+                        className="tactile-btn w-full bg-red-600 hover:bg-red-700 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                      >
+                        <i className="fa-solid fa-trash-can"></i>
+                        <span>Hapus Permanen Pesanan Ini (Booking Iseng)</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <a
+                        href={buildAdminWaConfirmationMessage(previewProofOrder).url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => {
+                          onVerifyPayment(previewProofOrder.id);
+                          setPreviewProofOrder(null);
+                        }}
+                        className="tactile-btn bg-emerald-700 hover:bg-emerald-800 text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 text-center"
+                      >
+                        <i className="fa-solid fa-circle-check"></i>
+                        <span>Bukti Asli (ACC & WA)</span>
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRejectFakeId(previewProofOrder.id)}
+                        className="tactile-btn bg-red-50 hover:bg-red-100 text-red-800 border border-red-300 font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                      >
+                        <i className="fa-solid fa-triangle-exclamation"></i>
+                        <span>Bukti Palsu / Tolak</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setPreviewProofOrder(null)}
+                      className="tactile-btn w-full bg-[#0B261C] text-[#D4AF37] font-black py-2.5 rounded-xl text-xs"
+                    >
+                      Tutup Preview Bukti Screenshot
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1441,65 +2148,111 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </p>
               ) : (
                 <div className="space-y-2.5">
-                  {adminNotifications.map((n) => (
-                    <div
-                      key={n.id}
-                      className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-2"
-                    >
-                      <div className="flex justify-between items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-black uppercase bg-emerald-800 text-amber-300 px-2 py-0.5 rounded">
-                          🔔 Pembayaran Berhasil & Jam Terkunci
-                        </span>
-                        <span className="text-[10px] text-stone-500 font-semibold">
-                          {n.createdAt}
-                        </span>
-                      </div>
-                      <h4 className="text-sm font-black text-[#0B261C]">{n.title}</h4>
-                      <p className="text-xs text-stone-700 leading-relaxed">{n.message}</p>
-
-                      {n.waConfirmationText && (
-                        <div className="bg-white p-2.5 rounded-xl border border-stone-200 space-y-1.5">
-                          <span className="text-[10px] font-black text-stone-500 uppercase block">
-                            Kata-Kata Konfirmasi Siap Kirim ke WA Pelanggan ({n.customerName}):
+                  {adminNotifications.map((n) => {
+                    const matchedOrder = n.orderId
+                      ? bookings.find((b) => b.id === n.orderId)
+                      : undefined;
+                    return (
+                      <div
+                        key={n.id}
+                        className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-2"
+                      >
+                        <div className="flex justify-between items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-black uppercase bg-emerald-800 text-amber-300 px-2 py-0.5 rounded">
+                            🔔 Pembayaran Masuk & Jam Terkunci
                           </span>
-                          <p className="text-xs text-stone-700 whitespace-pre-line leading-snug">
-                            {n.waConfirmationText}
-                          </p>
+                          <span className="text-[10px] text-stone-500 font-semibold">
+                            {n.createdAt}
+                          </span>
                         </div>
-                      )}
+                        <h4 className="text-sm font-black text-[#0B261C]">{n.title}</h4>
+                        <p className="text-xs text-stone-700 leading-relaxed">{n.message}</p>
 
-                      {n.waConfirmationUrl && (
-                        <div className="flex gap-2">
-                          <a
-                            href={n.waConfirmationUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={() => {
-                              if (n.orderId) onVerifyPayment(n.orderId);
-                            }}
-                            className="tactile-btn flex-1 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow text-center"
-                          >
-                            <i className="fa-brands fa-whatsapp text-sm"></i>
-                            <span>Langsung Share Konfirmasi ke WA Pelanggan</span>
-                          </a>
-                          {n.waConfirmationText && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onCopyText(
-                                  n.waConfirmationText!,
-                                  'Kata-kata Konfirmasi WA Pelanggan'
-                                )
-                              }
-                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold px-3 py-2 rounded-xl text-xs flex-shrink-0"
+                        {matchedOrder && (
+                          <div className="bg-white p-2.5 rounded-xl border border-emerald-300 space-y-2 text-xs">
+                            <div className="flex justify-between items-center gap-2 flex-wrap">
+                              <span className="text-stone-500 font-bold">Pembayaran Melalui:</span>
+                              <span className="font-black text-[#0B261C]">
+                                {matchedOrder.paymentChannel || matchedOrder.payMethod}
+                              </span>
+                            </div>
+
+                            {(matchedOrder.paymentProofImage ||
+                              matchedOrder.refundRequest?.proofImage) && (
+                              <div className="space-y-1.5">
+                                <div
+                                  onClick={() => handleOpenProofInspector(matchedOrder)}
+                                  className="relative h-32 w-full rounded-lg overflow-hidden bg-stone-950 border border-stone-300 cursor-pointer"
+                                >
+                                  <img
+                                    src={
+                                      matchedOrder.paymentProofImage ||
+                                      matchedOrder.refundRequest?.proofImage
+                                    }
+                                    alt={`Bukti Bayar ${matchedOrder.customer}`}
+                                    className="w-full h-full object-contain"
+                                  />
+                                  <span className="absolute bottom-1.5 right-1.5 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2 py-0.5 rounded">
+                                    🔍 Klik Cek Keaslian Struk
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenProofInspector(matchedOrder)}
+                                  className="tactile-btn w-full bg-[#0B261C] text-[#D4AF37] font-black py-2 px-3 rounded-lg text-[11px] flex items-center justify-center gap-1.5"
+                                >
+                                  <i className="fa-solid fa-magnifying-glass-plus"></i>
+                                  <span>Lihat & Cek Asli/Palsu Struk Screenshot</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {n.waConfirmationText && (
+                          <div className="bg-white p-2.5 rounded-xl border border-stone-200 space-y-1.5">
+                            <span className="text-[10px] font-black text-stone-500 uppercase block">
+                              Kata-Kata Konfirmasi Siap Kirim ke WA Pelanggan ({n.customerName}):
+                            </span>
+                            <p className="text-xs text-stone-700 whitespace-pre-line leading-snug">
+                              {n.waConfirmationText}
+                            </p>
+                          </div>
+                        )}
+
+                        {n.waConfirmationUrl && (
+                          <div className="flex gap-2">
+                            <a
+                              href={n.waConfirmationUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={() => {
+                                if (n.orderId) onVerifyPayment(n.orderId);
+                              }}
+                              className="tactile-btn flex-1 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow text-center"
                             >
-                              Salin
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                              <i className="fa-brands fa-whatsapp text-sm"></i>
+                              <span>Langsung Share Konfirmasi ke WA Pelanggan</span>
+                            </a>
+                            {n.waConfirmationText && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onCopyText(
+                                    n.waConfirmationText!,
+                                    'Kata-kata Konfirmasi WA Pelanggan'
+                                  )
+                                }
+                                className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold px-3 py-2 rounded-xl text-xs flex-shrink-0"
+                              >
+                                Salin
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1812,79 +2565,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* SUB-TAB BARU: KELOLA PENUKARAN POIN (MANAJEMEN REWARD POIN)     */}
         {/* =============================================================== */}
         {adminSubTab === 'rewards' && (
-          <div className="space-y-4 animate-page-enter">
-            {/* Kartu Header & Ringkasan Katalog Reward */}
-            <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-sm space-y-3.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <span className="text-xs font-extrabold uppercase tracking-wider text-amber-700 block">
-                    Manajemen Loyalitas Member
-                  </span>
-                  <h2 className="text-base sm:text-lg font-black text-[#0B261C] flex items-center gap-2 mt-0.5">
-                    <i className="fa-solid fa-gift text-amber-500"></i>
-                    <span>Kelola Penukaran Poin</span>
-                  </h2>
-                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed mt-1">
-                    Tambah, ubah, atau hapus hadiah penukaran poin. Setiap perubahan otomatis
-                    tersinkronisasi langsung ke halaman <b>Poin</b> di akun pelanggan.
+          <div className="space-y-2.5 animate-page-enter">
+            {/* Kartu Header & Ringkasan Katalog Reward (Ringkas & Hemat Tempat) */}
+            <div className="bg-white p-3 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-gift text-amber-500 text-xs"></i>
+                    <h2 className="text-sm font-black text-[#0B261C] truncate">
+                      Kelola Penukaran Poin
+                    </h2>
+                  </div>
+                  <p className="text-[11px] text-stone-500 truncate mt-0.5">
+                    Otomatis tampil di halaman Poin pelanggan
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleOpenAddRewardModal}
-                  className="tactile-btn gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-2xl text-xs sm:text-sm border border-amber-300 shadow-md flex items-center justify-center gap-2 flex-shrink-0"
+                  className="tactile-btn gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2 px-3 rounded-xl text-xs border border-amber-300 shadow-xs flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
                 >
-                  <i className="fa-solid fa-plus-circle text-sm"></i>
-                  <span>Tambah Reward Baru</span>
+                  <i className="fa-solid fa-plus-circle text-xs"></i>
+                  <span>+ Tambah Reward</span>
                 </button>
               </div>
 
-              {/* Statistik Singkat Reward */}
-              <div className="grid grid-cols-3 gap-2 pt-1 text-center">
-                <div className="bg-stone-50 border border-stone-200 rounded-xl p-2.5">
-                  <span className="text-[11px] font-bold text-stone-500 block">Total Item</span>
-                  <span className="text-base font-black text-[#0B261C]">
+              {/* Statistik Singkat Reward (Baris Ringkas) */}
+              <div className="grid grid-cols-3 gap-1.5 text-center">
+                <div className="bg-stone-50 border border-stone-200 rounded-xl py-1.5 px-2 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-stone-500">Total</span>
+                  <span className="text-xs font-black text-[#0B261C]">
                     {managedRewards.length}
                   </span>
                 </div>
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
-                  <span className="text-[11px] font-bold text-emerald-800 block">
-                    Aktif di Pelanggan
-                  </span>
-                  <span className="text-base font-black text-emerald-900">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl py-1.5 px-2 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-emerald-800">Aktif</span>
+                  <span className="text-xs font-black text-emerald-900">
                     {managedRewards.filter((r) => r.available !== false).length}
                   </span>
                 </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5">
-                  <span className="text-[11px] font-bold text-amber-800 block">
-                    Nonaktif / Habis
-                  </span>
-                  <span className="text-base font-black text-amber-900">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl py-1.5 px-2 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-amber-800">Off</span>
+                  <span className="text-xs font-black text-amber-900">
                     {managedRewards.filter((r) => r.available === false).length}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Daftar Item Reward Poin */}
-            <div className="space-y-3">
+            {/* Daftar Item Reward Poin (Padat & Rapi) */}
+            <div className="space-y-2">
               {managedRewards.length === 0 ? (
-                <div className="bg-white p-6 rounded-2xl border border-stone-200 text-center space-y-3">
-                  <i className="fa-solid fa-gift text-3xl text-stone-400"></i>
-                  <div>
-                    <p className="text-sm font-black text-stone-800">
-                      Belum Ada Katalog Reward Poin
-                    </p>
-                    <p className="text-xs text-stone-500 mt-1">
-                      Klik tombol &ldquo;Tambah Reward Baru&rdquo; di atas untuk membuat hadiah
-                      penukaran poin bagi pelanggan.
-                    </p>
-                  </div>
+                <div className="bg-white p-4 rounded-2xl border border-stone-200 text-center space-y-2">
+                  <i className="fa-solid fa-gift text-2xl text-stone-400"></i>
+                  <p className="text-xs font-black text-stone-800">
+                    Belum Ada Katalog Reward Poin
+                  </p>
                   <button
                     type="button"
                     onClick={handleOpenAddRewardModal}
-                    className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black text-xs px-4 py-2.5 rounded-xl border border-[#D4AF37]"
+                    className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black text-xs px-3.5 py-2 rounded-xl border border-[#D4AF37]"
                   >
                     + Tambah Reward Pertama
                   </button>
@@ -1897,70 +2638,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   return (
                     <div
                       key={item.id}
-                      className={`p-4 rounded-2xl border-2 transition space-y-3 shadow-xs ${
+                      className={`p-3 rounded-2xl border transition space-y-2 shadow-2xs ${
                         isAvailable
                           ? 'bg-white border-stone-200/90'
                           : 'bg-stone-100 border-stone-300 opacity-85'
                       }`}
                     >
-                      {/* Baris Atas: Urutan + Status Ketersediaan/Stok & Nominal Poin */}
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-black text-stone-500">
-                            #{idx + 1}
-                          </span>
-                          <span
-                            className={`text-xs font-extrabold px-2.5 py-1 rounded-lg border ${
-                              isAvailable
-                                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                                : 'bg-stone-200 text-stone-700 border-stone-300'
-                            }`}
-                          >
-                            {isAvailable
-                              ? `✓ Aktif · ${item.stockInfo || 'Tersedia'}`
-                              : `✕ Nonaktif · ${item.stockInfo || 'Habis'}`}
-                          </span>
+                      {/* Baris Atas: Nama Reward, Status & Nominal Poin */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-black text-stone-400">
+                              #{idx + 1}
+                            </span>
+                            <h3 className="text-xs sm:text-sm font-black text-[#0B261C] leading-snug">
+                              {item.title || item.label}
+                            </h3>
+                            <span
+                              className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                                isAvailable
+                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                  : 'bg-stone-200 text-stone-700 border-stone-300'
+                              }`}
+                            >
+                              {isAvailable
+                                ? `✓ ${item.stockInfo || 'Tersedia'}`
+                                : `✕ ${item.stockInfo || 'Habis'}`}
+                            </span>
+                          </div>
+                          {item.description && (
+                            <p className="text-[11px] text-stone-600 leading-snug mt-1 line-clamp-2">
+                              {item.description}
+                            </p>
+                          )}
                         </div>
 
-                        <span className="bg-[#0B261C] text-[#D4AF37] text-xs sm:text-sm font-black px-3 py-1 rounded-xl border border-[#D4AF37]">
+                        <span className="bg-[#0B261C] text-[#D4AF37] text-xs font-black px-2.5 py-1 rounded-xl border border-[#D4AF37] flex-shrink-0 whitespace-nowrap">
                           👑 {item.cost} Poin
                         </span>
                       </div>
 
-                      {/* Nama Reward & Catatan/Deskripsi */}
-                      <div className="space-y-1.5">
-                        <h3 className="text-sm sm:text-base font-black text-[#0B261C] leading-snug">
-                          {item.title || item.label}
-                        </h3>
-                        <div className="bg-stone-50 border border-stone-200 rounded-xl p-2.5 text-xs sm:text-sm text-stone-700 leading-relaxed">
-                          <span className="text-[11px] font-extrabold uppercase text-stone-500 block mb-0.5">
-                            Catatan / Deskripsi &amp; Syarat:
-                          </span>
-                          <p className="whitespace-pre-line">
-                            {item.description || 'Tidak ada catatan tambahan.'}
-                          </p>
-                        </div>
-                      </div>
-
                       {/* Konfirmasi Hapus Inline (Jika Klik Hapus) */}
                       {isDeletingThis ? (
-                        <div className="bg-red-50 border-2 border-red-300 rounded-xl p-3 space-y-2 animate-fade">
-                          <p className="text-xs font-black text-red-900">
-                            Yakin ingin menghapus reward &ldquo;{item.title || item.label}&rdquo; ({item.cost} Poin)? Item ini akan langsung hilang dari katalog pelanggan.
+                        <div className="bg-red-50 border border-red-300 rounded-xl p-2.5 space-y-2 animate-fade">
+                          <p className="text-[11px] font-black text-red-900">
+                            Hapus reward &ldquo;{item.title || item.label}&rdquo; ({item.cost} Poin)?
                           </p>
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5">
                             <button
                               type="button"
                               onClick={() => handleConfirmDeleteReward(item)}
-                              className="tactile-btn flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                              className="tactile-btn flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-1.5 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1"
                             >
                               <i className="fa-solid fa-trash-can"></i>
-                              <span>Ya, Hapus Permanen</span>
+                              <span>Ya, Hapus</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => setDeletingRewardId(null)}
-                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-2 px-3 rounded-xl text-xs"
+                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-1.5 px-2.5 rounded-lg text-[11px]"
                             >
                               Batal
                             </button>
@@ -1968,20 +2704,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       ) : (
                         /* Baris Tombol Aksi Admin: Edit, Toggle Status, Hapus */
-                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-stone-200/80">
+                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-stone-100">
                           <button
                             type="button"
                             onClick={() => handleOpenEditRewardModal(item)}
-                            className="tactile-btn flex-1 bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-2.5 px-3 rounded-xl text-xs border border-[#D4AF37]/50 flex items-center justify-center gap-1.5"
+                            className="tactile-btn flex-1 bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-1.5 px-2.5 rounded-xl text-[11px] border border-[#D4AF37]/50 flex items-center justify-center gap-1"
                           >
                             <i className="fa-solid fa-pen-to-square"></i>
-                            <span>Edit Reward</span>
+                            <span>Edit</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleToggleRewardAvailability(item)}
-                            className={`tactile-btn py-2.5 px-3 rounded-xl text-xs font-black border flex items-center justify-center gap-1.5 ${
+                            className={`tactile-btn py-1.5 px-2.5 rounded-xl text-[11px] font-black border flex items-center justify-center gap-1 ${
                               isAvailable
                                 ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
                                 : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
@@ -1998,7 +2734,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button
                             type="button"
                             onClick={() => setDeletingRewardId(item.id)}
-                            className="tactile-btn bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                            className="tactile-btn bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 font-black py-1.5 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1"
                           >
                             <i className="fa-solid fa-trash-can"></i>
                             <span>Hapus</span>
@@ -2012,7 +2748,730 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
         )}
+
+        {/* =============================================================== */}
+        {/* SUB-TAB BARU: KELOLA LAYANAN SPORT MASSAGE & SPA                */}
+        {/* =============================================================== */}
+        {adminSubTab === 'services' && (
+          <div className="space-y-2.5 animate-page-enter">
+            {/* Kartu Header & Filter Katalog Layanan (Ringkas, Padat & Tanpa Ruang Kosong) */}
+            <div className="bg-white p-3 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <i className="fa-solid fa-spa text-[#D4AF37] text-xs"></i>
+                    <h2 className="text-sm font-black text-[#0B261C] truncate">
+                      Kelola Layanan &amp; SPA
+                    </h2>
+                  </div>
+                  <p className="text-[11px] text-stone-500 truncate mt-0.5">
+                    Satuan ({managedSingleServices.filter((s) => s.available !== false).length}/{managedSingleServices.length}) • Paket Hemat ({managedPackageServices.filter((p) => p.available !== false).length}/{managedPackageServices.length})
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddServiceModal(serviceTabMode)}
+                  className="tactile-btn gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2 px-3 rounded-xl text-xs border border-amber-300 shadow-xs flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
+                >
+                  <i className="fa-solid fa-plus-circle text-xs"></i>
+                  <span>+ Tambah Layanan</span>
+                </button>
+              </div>
+
+              {/* Switch Tab: Layanan Satuan vs Paket Hemat */}
+              <div className="grid grid-cols-2 bg-stone-100 p-1 rounded-xl text-xs font-black gap-1">
+                <button
+                  type="button"
+                  onClick={() => setServiceTabMode('single')}
+                  className={`tactile-btn py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                    serviceTabMode === 'single'
+                      ? 'bg-[#0B261C] text-[#D4AF37] shadow-2xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-hands-holding-circle text-[11px]"></i>
+                  <span>Layanan Satuan ({managedSingleServices.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServiceTabMode('package')}
+                  className={`tactile-btn py-1.5 px-2 rounded-lg transition flex items-center justify-center gap-1.5 ${
+                    serviceTabMode === 'package'
+                      ? 'bg-[#0B261C] text-[#D4AF37] shadow-2xs'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
+                >
+                  <i className="fa-solid fa-fire-flame-curved text-[11px]"></i>
+                  <span>Paket Hemat ({managedPackageServices.length})</span>
+                </button>
+              </div>
+
+              {/* Pencarian & Filter Kategori Cepat */}
+              <div className="space-y-1.5">
+                <div className="relative">
+                  <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-[11px]"></i>
+                  <input
+                    type="text"
+                    value={serviceSearchQuery}
+                    onChange={(e) => setServiceSearchQuery(e.target.value)}
+                    placeholder="Cari layanan Sport Massage / SPA..."
+                    className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-stone-50 border border-stone-200 text-xs font-bold text-stone-800 focus:outline-none focus:border-[#0B261C]"
+                  />
+                  {serviceSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setServiceSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 text-xs px-1"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+                  {[
+                    { id: 'all', label: 'Semua' },
+                    { id: 'sport', label: '💪 Sport' },
+                    { id: 'wellness', label: '🌸 SPA' },
+                    { id: 'kebugaran', label: 'Kebugaran' },
+                    { id: 'otot_cedera', label: 'Cedera' },
+                    { id: 'spa_tubuh', label: 'Spa Tubuh' },
+                    { id: 'bekam', label: 'Bekam' },
+                    { id: 'khusus_wanita', label: '👩 Wanita' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() =>
+                        setServiceCategoryFilter(
+                          cat.id as 'all' | 'sport' | 'wellness' | ServiceGridCategory
+                        )
+                      }
+                      className={`tactile-btn px-2.5 py-1 rounded-lg text-[11px] font-extrabold whitespace-nowrap border transition ${
+                        serviceCategoryFilter === cat.id
+                          ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C]'
+                          : 'bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Daftar Kartu Layanan (Padat, Rapi & Tidak Makan Tempat) */}
+            <div className="space-y-2">
+              {filteredManagedServices.length === 0 ? (
+                <div className="bg-white p-4 rounded-2xl border border-stone-200 text-center space-y-2">
+                  <p className="text-xs font-black text-stone-800">
+                    Tidak Ada Layanan pada Filter Ini
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddServiceModal(serviceTabMode)}
+                    className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black text-xs px-3.5 py-2 rounded-xl border border-[#D4AF37]"
+                  >
+                    + Tambah Layanan Baru
+                  </button>
+                </div>
+              ) : (
+                filteredManagedServices.map((item, idx) => {
+                  const isAvailable = item.available !== false;
+                  const isDeletingThis = deletingServiceId === item.id;
+                  const isFemaleOnly = item.gender === 'female';
+                  const isMaleOnly = item.gender === 'male';
+                  const isSportCat =
+                    item.category === 'sport' || (!item.category && !isFemaleOnly);
+                  const hasSpots =
+                    item.id === 's2' || item.id === 's4' || Boolean(item.hasInjurySpots);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-3 rounded-2xl border transition space-y-2 shadow-2xs ${
+                        isAvailable
+                          ? 'bg-white border-stone-200/90'
+                          : 'bg-stone-100 border-stone-300 opacity-85'
+                      }`}
+                    >
+                      {/* Baris Utama: Info Layanan di Kiri + Harga & Poin di Kanan */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="text-[10px] font-black text-stone-400">
+                              #{idx + 1}
+                            </span>
+                            <span
+                              className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border ${
+                                isAvailable
+                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                  : 'bg-stone-200 text-stone-700 border-stone-300'
+                              }`}
+                            >
+                              {isAvailable ? '✓ Aktif' : '✕ Off'}
+                            </span>
+                            <span
+                              className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                                isSportCat
+                                  ? 'bg-sky-100 text-sky-950'
+                                  : 'bg-pink-100 text-pink-900'
+                              }`}
+                            >
+                              {isSportCat ? '💪 Sport' : '🌸 SPA'}
+                            </span>
+                            <span className="text-[10px] font-bold bg-stone-100 text-stone-700 px-1.5 py-0.5 rounded">
+                              {isFemaleOnly
+                                ? '👩 Wanita'
+                                : isMaleOnly
+                                ? '👨 Pria'
+                                : '👨👩 Umum'}
+                            </span>
+                            {hasSpots && (
+                              <span className="text-[10px] font-extrabold text-orange-900 bg-orange-100 px-1.5 py-0.5 rounded">
+                                🎯 Titik Cedera
+                              </span>
+                            )}
+                          </div>
+
+                          <h3 className="text-xs sm:text-sm font-black text-[#0B261C] leading-snug">
+                            {item.name}
+                          </h3>
+
+                          <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-stone-600">
+                            <span className="font-bold text-stone-700 inline-flex items-center gap-1">
+                              <i className="fa-regular fa-clock text-emerald-700 text-[10px]"></i>
+                              {item.duration}
+                            </span>
+                            {item.tag && (
+                              <>
+                                <span>•</span>
+                                <span className="font-semibold text-amber-900">{item.tag}</span>
+                              </>
+                            )}
+                          </div>
+
+                          {item.desc && (
+                            <p className="text-[11px] text-stone-500 leading-snug line-clamp-2">
+                              {item.desc}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Kolom Kanan: Harga & Poin */}
+                        <div className="text-right flex-shrink-0 space-y-1">
+                          <div className="text-xs sm:text-sm font-black text-emerald-900 whitespace-nowrap">
+                            {formatRupiah(item.price)}
+                          </div>
+                          {item.normalPrice && item.normalPrice > item.price && (
+                            <div className="text-[10px] line-through text-stone-400 font-bold whitespace-nowrap">
+                              {formatRupiah(item.normalPrice)}
+                            </div>
+                          )}
+                          <span className="inline-block bg-[#0B261C] text-[#D4AF37] text-[10px] font-black px-2 py-0.5 rounded-lg border border-[#D4AF37]">
+                            +{item.points} Poin
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Konfirmasi Hapus Inline */}
+                      {isDeletingThis ? (
+                        <div className="bg-red-50 border border-red-300 rounded-xl p-2.5 space-y-2 animate-fade">
+                          <p className="text-[11px] font-black text-red-900">
+                            Hapus layanan &ldquo;{item.name}&rdquo; ({formatRupiah(item.price)})?
+                          </p>
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleConfirmDeleteService(item, serviceTabMode)}
+                              className="tactile-btn flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-1.5 px-2.5 rounded-lg text-[11px] flex items-center justify-center gap-1"
+                            >
+                              <i className="fa-solid fa-trash-can"></i>
+                              <span>Ya, Hapus</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingServiceId(null)}
+                              className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-1.5 px-2.5 rounded-lg text-[11px]"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Tombol Aksi Admin Ringkas: Edit, Aktif/Nonaktif, Hapus */
+                        <div className="flex items-center gap-1.5 pt-1.5 border-t border-stone-100">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditServiceModal(item, serviceTabMode)}
+                            className="tactile-btn flex-1 bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] font-black py-1.5 px-2.5 rounded-xl text-[11px] border border-[#D4AF37]/50 flex items-center justify-center gap-1"
+                          >
+                            <i className="fa-solid fa-pen-to-square"></i>
+                            <span>Edit</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleServiceAvailability(item, serviceTabMode)
+                            }
+                            className={`tactile-btn py-1.5 px-2.5 rounded-xl text-[11px] font-black border flex items-center justify-center gap-1 ${
+                              isAvailable
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
+                            }`}
+                          >
+                            <i
+                              className={
+                                isAvailable ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'
+                              }
+                            ></i>
+                            <span>{isAvailable ? 'Nonaktifkan' : 'Aktifkan'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setDeletingServiceId(item.id)}
+                            className="tactile-btn bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 font-black py-1.5 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Opsi Kembalikan Daftar Layanan Bawaan (Baris Ringkas) */}
+            <div className="bg-stone-100 px-3 py-2 rounded-xl border border-stone-200/90 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-bold text-stone-600 truncate">
+                Kembalikan daftar layanan bawaan?
+              </span>
+              {confirmResetServices ? (
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleResetServicesToDefault}
+                    className="tactile-btn bg-red-600 text-white font-black text-[11px] px-2.5 py-1 rounded-lg"
+                  >
+                    Ya, Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResetServices(false)}
+                    className="tactile-btn bg-stone-200 text-stone-800 font-bold text-[11px] px-2.5 py-1 rounded-lg"
+                  >
+                    Batal
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmResetServices(true)}
+                  className="tactile-btn bg-white hover:bg-stone-50 text-stone-700 border border-stone-300 font-bold text-[11px] px-2.5 py-1 rounded-lg flex-shrink-0"
+                >
+                  <i className="fa-solid fa-rotate-left mr-1"></i>
+                  Reset Default
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* ================================================================= */}
+      {/* MODAL FORM TAMBAH / EDIT LAYANAN SPORT MASSAGE & SPA (ADMIN)      */}
+      {/* ================================================================= */}
+      {serviceModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-page-enter"
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            editingServiceId
+              ? 'Edit Layanan Sport Massage & SPA'
+              : 'Tambah Layanan Sport Massage & SPA Baru'
+          }
+        >
+          <div className="bg-white w-full max-w-md rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            {/* Header Modal */}
+            <div className="bg-[#0B261C] text-white px-4 py-3.5 border-b border-[#D4AF37]/50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <i className="fa-solid fa-spa text-[#D4AF37] text-base"></i>
+                <h3 className="text-sm sm:text-base font-black text-[#D4AF37] truncate">
+                  {editingServiceId
+                    ? 'Edit Layanan Sport Massage / SPA'
+                    : 'Tambah Layanan Baru'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setServiceModalOpen(false)}
+                className="text-stone-300 hover:text-white text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0"
+              >
+                ✕ Tutup
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form
+              onSubmit={handleSaveServiceForm}
+              className="p-4 space-y-3.5 overflow-y-auto text-xs sm:text-sm"
+            >
+              {/* Pilihan Jenis Katalog: Layanan Satuan vs Paket Hemat */}
+              <div>
+                <span className="block font-black text-[#0B261C] mb-1.5">
+                  Jenis Layanan:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setServiceTypeInput('single')}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      serviceTypeInput === 'single'
+                        ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C] shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <i className="fa-solid fa-hands-holding-circle"></i>
+                    <span>Layanan Satuan</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServiceTypeInput('package')}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      serviceTypeInput === 'package'
+                        ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C] shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <i className="fa-solid fa-fire-flame-curved"></i>
+                    <span>Paket Hemat</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Kategori Utama: Sport Massage vs SPA & Wellness */}
+              <div>
+                <span className="block font-black text-[#0B261C] mb-1.5">
+                  Kategori Utama Treatment:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setServiceCategoryInput('sport')}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      serviceCategoryInput === 'sport'
+                        ? 'bg-sky-900 text-amber-300 border-sky-950 shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <span>💪 Sport Massage</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServiceCategoryInput('wellness')}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      serviceCategoryInput === 'wellness'
+                        ? 'bg-pink-800 text-amber-200 border-pink-950 shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <span>🌸 SPA &amp; Wellness</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Nama Layanan */}
+              <div>
+                <label className="block font-black text-[#0B261C] mb-1">
+                  Nama Layanan / Paket <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={serviceNameInput}
+                  onChange={(e) => {
+                    setServiceNameInput(e.target.value);
+                    setServiceFormError('');
+                  }}
+                  placeholder="Contoh: Pijat Sport Recovery / Aromatherapy Body Spa"
+                  className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2.5 font-bold text-stone-900 focus:outline-none"
+                />
+              </div>
+
+              {/* Durasi Layanan + Pilihan Cepat */}
+              <div>
+                <label className="block font-black text-[#0B261C] mb-1">
+                  Durasi Sesi Terapi <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={serviceDurationInput}
+                  onChange={(e) => setServiceDurationInput(e.target.value)}
+                  placeholder="Contoh: 60 Menit / 90 Menit"
+                  className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2 font-bold text-stone-900 focus:outline-none"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {['30 Menit', '45 Menit', '60 Menit', '90 Menit', '120 Menit', '150 Menit'].map(
+                    (dur) => (
+                      <button
+                        key={dur}
+                        type="button"
+                        onClick={() => setServiceDurationInput(dur)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          serviceDurationInput === dur
+                            ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C]'
+                            : 'bg-stone-100 text-stone-700 border-stone-300 hover:bg-stone-200'
+                        }`}
+                      >
+                        {dur}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              {/* Harga & Poin Loyalitas */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black text-[#0B261C] mb-1">
+                    Harga Layanan (Rp) <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={1000}
+                    step={5000}
+                    value={servicePriceInput}
+                    onChange={(e) => {
+                      setServicePriceInput(e.target.value);
+                      setServiceFormError('');
+                    }}
+                    placeholder="Contoh: 200000"
+                    className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2.5 font-black text-emerald-900 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black text-[#0B261C] mb-1">
+                    Bonus Poin Member
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={servicePointsInput}
+                    onChange={(e) => setServicePointsInput(e.target.value)}
+                    placeholder="Contoh: 15"
+                    className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3.5 py-2.5 font-black text-[#0B261C] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Harga Normal / Coret (Opsional untuk Paket Hemat / Promo) & Tag Singkat */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-black text-[#0B261C] mb-1">
+                    Harga Normal / Coret (Opsional)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={5000}
+                    value={serviceNormalPriceInput}
+                    onChange={(e) => setServiceNormalPriceInput(e.target.value)}
+                    placeholder="Kosongkan jika tidak ada"
+                    className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3 py-2 font-bold text-stone-700 focus:outline-none text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-black text-[#0B261C] mb-1">
+                    Label / Tag Singkat
+                  </label>
+                  <input
+                    type="text"
+                    value={serviceTagInput}
+                    onChange={(e) => setServiceTagInput(e.target.value)}
+                    placeholder="Misal: Pemulihan Otot"
+                    className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl px-3 py-2 font-bold text-stone-800 focus:outline-none text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Target Gender Pelanggan */}
+              <div>
+                <span className="block font-black text-[#0B261C] mb-1.5">
+                  Target Pelanggan (Gender):
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: 'all', label: '👨👩 Semua Gender' },
+                    { id: 'female', label: '👩 Khusus Wanita' },
+                    { id: 'male', label: '👨 Khusus Pria' },
+                  ].map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => {
+                        setServiceGenderInput(g.id as 'all' | 'female' | 'male');
+                        if (
+                          g.id === 'female' &&
+                          !serviceGridCatsInput.includes('khusus_wanita')
+                        ) {
+                          setServiceGridCatsInput((prev) => [...prev, 'khusus_wanita']);
+                        }
+                      }}
+                      className={`tactile-btn py-2 px-2 rounded-xl font-black text-[11px] border text-center ${
+                        serviceGenderInput === g.id
+                          ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C]'
+                          : 'bg-stone-100 text-stone-700 border-stone-300'
+                      }`}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Kategori Ikon di Halaman Pelanggan (Bisa Pilih Lebih dari 1) */}
+              <div>
+                <span className="block font-black text-[#0B261C] mb-1">
+                  Tampilkan pada Ikon Kategori Pelanggan:
+                </span>
+                <p className="text-[11px] text-stone-500 mb-1.5">
+                  Pilih satu atau beberapa kategori agar layanan mudah ditemukan pelanggan:
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {GRID_CATEGORY_OPTIONS.map((opt) => {
+                    const active = serviceGridCatsInput.includes(opt.id);
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => toggleGridCatInput(opt.id)}
+                        className={`tactile-btn px-3 py-1.5 rounded-xl text-xs font-extrabold border flex items-center gap-1.5 transition ${
+                          active
+                            ? 'bg-emerald-900 text-[#D4AF37] border-emerald-950 shadow-2xs'
+                            : 'bg-stone-50 text-stone-700 border-stone-300 hover:bg-stone-100'
+                        }`}
+                      >
+                        <i
+                          className={`fa-solid ${
+                            active ? 'fa-square-check text-[#D4AF37]' : 'fa-square text-stone-300'
+                          }`}
+                        ></i>
+                        <span>{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Deskripsi & Manfaat Layanan */}
+              <div>
+                <label className="block font-black text-[#0B261C] mb-1">
+                  Deskripsi / Manfaat Layanan
+                </label>
+                <textarea
+                  rows={2}
+                  value={serviceDescInput}
+                  onChange={(e) => setServiceDescInput(e.target.value)}
+                  placeholder="Jelaskan manfaat terapi atau isi paket layanan untuk pelanggan..."
+                  className="w-full bg-stone-50 border border-stone-300 focus:border-[#0B261C] rounded-xl p-3 font-medium text-stone-800 focus:outline-none leading-relaxed text-xs"
+                />
+              </div>
+
+              {/* Opsi Tambahan: Pilihan Titik Keluhan Otot (Khusus Layanan Satuan) */}
+              {serviceTypeInput === 'single' && (
+                <div className="bg-amber-50/90 border border-amber-300 rounded-2xl p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="font-black text-[#0B261C] block text-xs">
+                      🎯 Aktifkan Pilihan Titik Keluhan / Cedera?
+                    </span>
+                    <span className="text-[11px] text-stone-600 block">
+                      Jika aktif, pelanggan bisa memilih titik anatomi tubuh (Lutut, Pinggang, Bahu, dll) saat memilih layanan ini.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setServiceHasInjurySpotsInput(!serviceHasInjurySpotsInput)}
+                    className={`tactile-btn px-3 py-2 rounded-xl font-black text-xs border flex-shrink-0 ${
+                      serviceHasInjurySpotsInput
+                        ? 'bg-[#0B261C] text-[#D4AF37] border-[#0B261C]'
+                        : 'bg-white text-stone-700 border-stone-300'
+                    }`}
+                  >
+                    {serviceHasInjurySpotsInput ? '✓ Aktif' : 'Tidak'}
+                  </button>
+                </div>
+              )}
+
+              {/* Status Ketersediaan Layanan */}
+              <div>
+                <span className="block font-black text-[#0B261C] mb-1.5">
+                  Status Layanan di Halaman Pelanggan:
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setServiceAvailableInput(true)}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      serviceAvailableInput
+                        ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <i className="fa-solid fa-circle-check"></i>
+                    <span>Aktif / Tersedia</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServiceAvailableInput(false)}
+                    className={`tactile-btn py-2.5 px-3 rounded-xl font-black text-xs border flex items-center justify-center gap-1.5 ${
+                      !serviceAvailableInput
+                        ? 'bg-stone-800 text-amber-300 border-stone-900 shadow-xs'
+                        : 'bg-stone-100 text-stone-600 border-stone-300'
+                    }`}
+                  >
+                    <i className="fa-solid fa-eye-slash"></i>
+                    <span>Nonaktif / Sembunyikan</span>
+                  </button>
+                </div>
+              </div>
+
+              {serviceFormError && (
+                <div className="bg-red-50 border border-red-300 text-red-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-triangle-exclamation text-red-600"></i>
+                  <span>{serviceFormError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setServiceModalOpen(false)}
+                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-3 px-4 rounded-2xl text-xs sm:text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-2xl text-xs sm:text-sm border border-amber-300 shadow-md flex items-center justify-center gap-2"
+                >
+                  <i className="fa-solid fa-floppy-disk"></i>
+                  <span>
+                    {editingServiceId ? 'Simpan Perubahan Layanan' : 'Simpan Layanan Baru'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ================================================================= */}
       {/* MODAL FORM TAMBAH / EDIT REWARD POIN (KHUSUS ADMIN)               */}
@@ -2169,10 +3628,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* BOTTOM NAVIGATION KHUSUS ADMIN (5 MENU ADMIN - RAPI & TIDAK TABRAKAN) */}
+      {/* BOTTOM NAVIGATION KHUSUS ADMIN (6 MENU ADMIN - RAPI & TIDAK TABRAKAN) */}
       <nav
         aria-label="Navigasi Admin"
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-stone-900 text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-5 gap-0.5 py-1.5 px-1 text-[10px] font-bold z-40 shadow-2xl"
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 max-w-md w-full bg-stone-900 text-stone-400 border-t-2 border-[#D4AF37]/50 grid grid-cols-6 gap-0.5 py-1.5 px-1 text-[9.5px] font-bold z-40 shadow-2xl"
       >
         <button
           type="button"
@@ -2186,10 +3645,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <i className="fa-solid fa-clipboard-check text-sm"></i>
           <span className="leading-none truncate max-w-full">{isEn ? 'Orders' : 'Pesanan'}</span>
           {paidUnverifiedCount > 0 && (
-            <span className="absolute top-0.5 right-1.5 bg-emerald-500 text-stone-950 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+            <span className="absolute top-0.5 right-1 bg-emerald-500 text-stone-950 text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center">
               {paidUnverifiedCount}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setAdminSubTab('services')}
+          className={`tactile-btn flex flex-col items-center justify-center gap-0.5 py-1.5 px-0.5 rounded-xl min-w-0 transition ${
+            adminSubTab === 'services'
+              ? 'text-[#D4AF37] bg-[#D4AF37]/15 font-black'
+              : 'text-stone-400 hover:text-stone-200'
+          }`}
+        >
+          <i className="fa-solid fa-spa text-sm"></i>
+          <span className="leading-none truncate max-w-full">
+            {isEn ? 'Services' : 'Layanan'}
+          </span>
         </button>
         <button
           type="button"
@@ -2201,9 +3674,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <i className="fa-solid fa-bullhorn text-sm"></i>
-          <span className="leading-none truncate max-w-full">Notif &amp; Bot</span>
+          <span className="leading-none truncate max-w-full">Notif</span>
           {unreadAdminNotifs > 0 && (
-            <span className="absolute top-0.5 right-1.5 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+            <span className="absolute top-0.5 right-1 bg-red-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
               {unreadAdminNotifs}
             </span>
           )}
@@ -2219,7 +3692,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         >
           <i className="fa-solid fa-gift text-sm"></i>
           <span className="leading-none truncate max-w-full">
-            {isEn ? 'Rewards' : 'Kelola Poin'}
+            {isEn ? 'Rewards' : 'Poin'}
           </span>
         </button>
         <button

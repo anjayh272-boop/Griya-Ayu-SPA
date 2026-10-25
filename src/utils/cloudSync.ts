@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -12,6 +13,7 @@ import {
   AppNotification,
   BookingOrder,
   PointReward,
+  ServiceItem,
   TimeSlot,
   User,
 } from '../types/index.ts';
@@ -32,6 +34,8 @@ export interface GlobalSpaSettingsDoc {
   closedSpecificDates?: string[];
   adminProfile?: User;
   pointRewards?: PointReward[];
+  singleServices?: ServiceItem[];
+  packageServices?: ServiceItem[];
   updatedAt?: number;
 }
 
@@ -200,6 +204,24 @@ export async function syncBookingToCloud(order: BookingOrder): Promise<void> {
 }
 
 /**
+ * Hapus 1 pesanan booking dari Firestore global secara permanen (dipakai oleh Admin untuk menghapus pesanan iseng/main-main).
+ */
+export async function deleteBookingFromCloud(orderId: number): Promise<void> {
+  if (!orderId) return;
+  const docId = String(orderId);
+  const path = `${CLOUD_COLLECTIONS.BOOKINGS}/${docId}`;
+  try {
+    await deleteDoc(doc(db, CLOUD_COLLECTIONS.BOOKINGS, docId));
+  } catch (error) {
+    try {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+}
+
+/**
  * Simpan / perbarui banyak pesanan booking ke Firestore global.
  */
 export async function syncAllBookingsToCloud(orders: BookingOrder[]): Promise<void> {
@@ -219,6 +241,24 @@ export async function syncNotificationToCloud(notif: AppNotification): Promise<v
   } catch (error) {
     try {
       handleFirestoreError(error, OperationType.WRITE, path);
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+}
+
+/**
+ * Hapus 1 notifikasi dari Firestore global secara permanen.
+ */
+export async function deleteNotificationFromCloud(notifId: number): Promise<void> {
+  if (!notifId) return;
+  const docId = String(notifId);
+  const path = `${CLOUD_COLLECTIONS.NOTIFICATIONS}/${docId}`;
+  try {
+    await deleteDoc(doc(db, CLOUD_COLLECTIONS.NOTIFICATIONS, docId));
+  } catch (error) {
+    try {
+      handleFirestoreError(error, OperationType.DELETE, path);
     } catch {
       // Non-fatal fallback
     }

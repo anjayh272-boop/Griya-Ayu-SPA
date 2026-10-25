@@ -1,10 +1,54 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0f3d2e" />
-  <rect x="28" y="28" width="456" height="456" rx="92" fill="none" stroke="#D4AF37" stroke-width="8" stroke-opacity="0.6" />
-  <circle cx="256" cy="215" r="105" fill="#D4AF37" fill-opacity="0.12" stroke="#D4AF37" stroke-width="6" />
-  <path d="M256 125 C220 165, 195 205, 256 265 C317 205, 292 165, 256 125 Z" fill="#D4AF37" />
-  <path d="M256 165 C205 185, 175 225, 225 268 C240 245, 248 220, 256 165 Z" fill="#D4AF37" fill-opacity="0.8" />
-  <path d="M256 165 C307 185, 337 225, 287 268 C272 245, 264 220, 256 165 Z" fill="#D4AF37" fill-opacity="0.8" />
-  <text x="256" y="380" font-family="Georgia, serif" font-size="56" font-weight="bold" fill="#D4AF37" text-anchor="middle" letter-spacing="4">GRIYA AYU</text>
-  <text x="256" y="425" font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="#F5F5F0" fill-opacity="0.9" text-anchor="middle" letter-spacing="3">SPORT MASSAGE &amp; SPA</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gaLotusGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFF5C0" />
+      <stop offset="40%" stop-color="#F3E5AB" />
+      <stop offset="78%" stop-color="#D4AF37" />
+      <stop offset="100%" stop-color="#9E7614" />
+    </linearGradient>
+    <linearGradient id="gaLotusInner" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F8EBA8" />
+      <stop offset="55%" stop-color="#D4AF37" />
+      <stop offset="100%" stop-color="#8B6508" />
+    </linearGradient>
+    <linearGradient id="gaGoldRing" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#C59B27" />
+      <stop offset="50%" stop-color="#FFF3B0" />
+      <stop offset="100%" stop-color="#C59B27" />
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed 1:1 Square Background (#0f3d2e) with ~18-20% Safe Zone Padding -->
+  <rect width="512" height="512" fill="#0f3d2e" />
+
+  <!-- Centered Logo Group inside Safe Zone (x: 96..416, y: 92..420) -->
+  <g transform="translate(112, 86) scale(2.4)">
+    <!-- Outer Gold Ring & Dark Circle -->
+    <circle cx="60" cy="56" r="50" fill="#071A12" stroke="url(#gaGoldRing)" stroke-width="3.2" />
+    <circle cx="60" cy="56" r="46" fill="none" stroke="#D4AF37" stroke-opacity="0.35" stroke-width="0.9" />
+
+    <!-- Golden Lotus Petals -->
+    <g transform="translate(0, -4)">
+      <path d="M60 74 C40 74, 20 65, 14 50 C26 51, 41 57, 54 67 Z" fill="url(#gaLotusInner)" stroke="#071A12" stroke-width="0.9" />
+      <path d="M60 74 C80 74, 100 65, 106 50 C94 51, 79 57, 66 67 Z" fill="url(#gaLotusInner)" stroke="#071A12" stroke-width="0.9" />
+      <path d="M60 72 C38 67, 23 50, 24 31 C36 36, 48 48, 56 64 Z" fill="url(#gaLotusGrad)" stroke="#071A12" stroke-width="1" />
+      <path d="M60 72 C82 67, 97 50, 96 31 C84 36, 72 48, 64 64 Z" fill="url(#gaLotusGrad)" stroke="#071A12" stroke-width="1" />
+      <path d="M60 70 C43 60, 35 40, 41 20 C49 29, 55 43, 59 61 Z" fill="url(#gaLotusInner)" stroke="#071A12" stroke-width="1" />
+      <path d="M60 70 C77 60, 85 40, 79 20 C71 29, 65 43, 61 61 Z" fill="url(#gaLotusInner)" stroke="#071A12" stroke-width="1" />
+      <path d="M60 13 C69 27, 72 46, 60 68 C48 46, 51 27, 60 13 Z" fill="url(#gaLotusGrad)" stroke="#071A12" stroke-width="1.1" />
+      <path d="M58 74 C46 79, 34 79, 27 73 C36 69, 47 69, 58 74 Z" fill="url(#gaLotusGrad)" stroke="#071A12" stroke-width="0.8" />
+      <path d="M62 74 C74 79, 86 79, 93 73 C84 69, 73 69, 62 74 Z" fill="url(#gaLotusGrad)" stroke="#071A12" stroke-width="0.8" />
+      <path d="M60 69 C66 74, 66 81, 60 86 C54 81, 54 74, 60 69 Z" fill="url(#gaLotusGrad)" stroke="#071A12" stroke-width="0.9" />
+    </g>
+
+    <!-- GA Monogram -->
+    <text x="60" y="59" text-anchor="middle" fill="url(#gaGoldRing)" stroke="#071A12" stroke-width="3" paint-order="stroke fill" font-family="Georgia, serif" font-weight="900" font-size="28" letter-spacing="1">GA</text>
+
+    <!-- SPORT MASSAGE & SPA -->
+    <text x="60" y="90" text-anchor="middle" fill="#F3E5AB" font-family="Arial, sans-serif" font-weight="800" font-size="6.2" letter-spacing="1.2">SPORT MASSAGE &amp; SPA</text>
+
+    <!-- AIFMO-P CERTIFIED Badge -->
+    <rect x="6" y="102" width="108" height="18" rx="9" fill="url(#gaGoldRing)" stroke="#071A12" stroke-width="1" />
+    <text x="60" y="114" text-anchor="middle" fill="#071A12" font-family="Arial, sans-serif" font-weight="900" font-size="8.2" letter-spacing="1.2">AIFMO-P CERTIFIED</text>
+  </g>
 </svg>

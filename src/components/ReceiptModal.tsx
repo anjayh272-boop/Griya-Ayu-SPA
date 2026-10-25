@@ -13,6 +13,8 @@ import {
   buildAdminWaConfirmationMessage,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
+  QRIS_PAYMENT_CHANNELS,
+  BANK_TRANSFER_CHANNELS,
 } from '../utils/spaLogic.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
@@ -24,7 +26,8 @@ interface ReceiptModalProps {
   onPayFromReceipt?: (
     orderId: number,
     methodType: PaymentMethodType,
-    paymentProofImage?: string
+    paymentProofImage?: string,
+    paymentChannel?: string
   ) => void;
   onFailFromReceipt?: (orderId: number, methodType: PaymentMethodType) => void;
   onCopyText?: (text: string, label: string) => void;
@@ -41,22 +44,30 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 }) => {
   const [remainingMs, setRemainingMs] = useState<number>(20 * 60 * 1000);
   const [selectedType, setSelectedType] = useState<PaymentMethodType>('qris');
+  const [selectedChannel, setSelectedChannel] = useState<string>(QRIS_PAYMENT_CHANNELS[0]);
   const [receiptProofImage, setReceiptProofImage] = useState<string>('');
   const [receiptProofError, setReceiptProofError] = useState<string>('');
+  const [zoomProofOpen, setZoomProofOpen] = useState<boolean>(false);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   useEffect(() => {
     if (order) {
       if (order.payMethodType === 'qris') {
         setSelectedType('qris');
+        setSelectedChannel(order.paymentChannel || QRIS_PAYMENT_CHANNELS[0]);
       } else if (order.payMethodType === 'cash') {
         setSelectedType('cash');
+        setSelectedChannel('Cash / Bayar di Tempat');
       } else {
         setSelectedType('bank_transfer');
+        setSelectedChannel(order.paymentChannel || BANK_TRANSFER_CHANNELS[0]);
       }
       setReceiptProofImage(order.paymentProofImage || '');
       setReceiptProofError('');
+      setZoomProofOpen(false);
+      setZoomLevel(1);
     }
-  }, [order?.id, order?.payMethodType]);
+  }, [order?.id, order?.payMethodType, order?.paymentProofImage]);
 
   useEffect(() => {
     if (!order) return;
@@ -81,6 +92,13 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handleSwitchMethodInReceipt = (newType: PaymentMethodType) => {
     if (isFailed || isExpired) return;
     setSelectedType(newType);
+    setSelectedChannel(
+      newType === 'qris'
+        ? QRIS_PAYMENT_CHANNELS[0]
+        : newType === 'bank_transfer'
+        ? BANK_TRANSFER_CHANNELS[0]
+        : 'Cash / Bayar di Tempat'
+    );
     setReceiptProofError('');
     if (onChangeMethodType) {
       onChangeMethodType(order.id, newType);
@@ -123,7 +141,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       }
     }
     if (onPayFromReceipt) {
-      onPayFromReceipt(order.id, selectedType, isCashSelected ? undefined : receiptProofImage);
+      onPayFromReceipt(
+        order.id,
+        selectedType,
+        isCashSelected ? undefined : receiptProofImage,
+        isCashSelected ? 'Cash / Bayar di Tempat' : selectedChannel
+      );
     }
   };
 
@@ -246,19 +269,23 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </span>
               </div>
               <div className="flex justify-between items-start gap-2">
-                <span className="text-stone-500 flex-shrink-0">Metode Pembayaran:</span>
-                <span className="font-extrabold text-[#0B261C] text-right">{methodInfo.label}</span>
+                <span className="text-stone-500 flex-shrink-0">Pembayaran Melalui:</span>
+                <span className="font-extrabold text-[#0B261C] text-right">
+                  {order.paymentChannel || order.payMethod || methodInfo.label}
+                </span>
               </div>
-              {!methodInfo.isQris && (
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-200">
-                  <span className="text-stone-600 font-bold text-[10px]">
-                    {methodInfo.isCash ? 'Keterangan:' : 'Rekening Tujuan:'}
-                  </span>
-                  <span className="font-mono font-black text-[11px] text-[#0B261C]">
-                    {methodInfo.vaNumber}
-                  </span>
-                </div>
-              )}
+              <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-200">
+                <span className="text-stone-600 font-bold text-[10px]">
+                  {methodInfo.isCash
+                    ? 'Keterangan:'
+                    : methodInfo.isQris
+                    ? 'NMID QRIS Tujuan:'
+                    : 'Rekening Tujuan:'}
+                </span>
+                <span className="font-mono font-black text-[11px] text-[#0B261C] text-right">
+                  {order.vaNumber || methodInfo.vaNumber}
+                </span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-stone-500">Status Slot Jam:</span>
                 <span
@@ -274,23 +301,48 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 </span>
               </div>
 
-              {/* Preview Bukti Pembayaran jika diunggah (QRIS/TF) */}
-              {order.paymentProofImage && (
-                <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 space-y-1.5 pt-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-black text-[#0B261C]">
-                      📎 Bukti Pembayaran Terlampir:
+              {/* Preview Bukti Pembayaran Screenshot jika diunggah (QRIS/TF) - Bisa Di-klik & Di-Zoom */}
+              {(order.paymentProofImage || order.refundRequest?.proofImage) && (
+                <div className="bg-emerald-50/80 p-3 rounded-xl border-2 border-emerald-300 space-y-2 pt-2">
+                  <div className="flex justify-between items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-black text-[#0B261C] flex items-center gap-1">
+                      <i className="fa-solid fa-camera text-emerald-700"></i>
+                      <span>Struk Screenshot Pembayaran Online:</span>
                     </span>
-                    <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
-                      Sudah Diunggah
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setZoomLevel(1);
+                        setZoomProofOpen(true);
+                      }}
+                      className="text-[10px] font-black bg-[#0B261C] text-[#D4AF37] px-2.5 py-1 rounded-lg border border-[#D4AF37]/50"
+                    >
+                      🔍 Perbesar & Cek Keaslian
+                    </button>
+                  </div>
+
+                  <div className="text-[10px] bg-white px-2.5 py-1.5 rounded-lg border border-emerald-200 flex justify-between items-center gap-2">
+                    <span className="text-stone-500 font-bold">Melalui:</span>
+                    <span className="font-black text-emerald-950 text-right">
+                      {order.paymentChannel || order.payMethod}
                     </span>
                   </div>
-                  <div className="h-32 w-full rounded-lg overflow-hidden bg-stone-900 border border-stone-300">
+
+                  <div
+                    onClick={() => {
+                      setZoomLevel(1);
+                      setZoomProofOpen(true);
+                    }}
+                    className="relative h-44 w-full rounded-xl overflow-hidden bg-stone-950 border border-stone-300 cursor-pointer group"
+                  >
                     <img
-                      src={order.paymentProofImage}
-                      alt="Bukti Pembayaran Pelanggan"
+                      src={order.paymentProofImage || order.refundRequest?.proofImage}
+                      alt="Struk Screenshot Pembayaran Pelanggan"
                       className="w-full h-full object-contain"
                     />
+                    <span className="absolute bottom-2 right-2 bg-black/80 text-[#D4AF37] text-[10px] font-black px-2.5 py-1 rounded-lg border border-[#D4AF37]/40">
+                      🔍 Klik Gambar untuk Zoom (Cek Asli/Palsu)
+                    </span>
                   </div>
                 </div>
               )}
@@ -452,8 +504,32 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 {/* Upload Bukti Transfer / Screenshot QRIS di Struk Pending (Hanya untuk QRIS/TF) */}
                 {!isCashSelected && (
                   <div className="bg-stone-50 p-3 rounded-xl border border-[#D4AF37] space-y-2">
-                    <span className="text-[11px] font-black text-[#0B261C] block">
-                      Upload Bukti Transfer / Screenshot QRIS <span className="text-red-600">*</span>
+                    <div>
+                      <label
+                        htmlFor="receiptChannelSelect"
+                        className="text-[10px] font-black text-[#0B261C] block mb-1"
+                      >
+                        Pembayaran Melalui Aplikasi / Bank Apa:
+                      </label>
+                      <select
+                        id="receiptChannelSelect"
+                        value={selectedChannel}
+                        onChange={(e) => setSelectedChannel(e.target.value)}
+                        className="w-full bg-white border border-stone-300 text-stone-900 text-[11px] font-bold p-2 rounded-lg"
+                      >
+                        {(selectedType === 'qris'
+                          ? QRIS_PAYMENT_CHANNELS
+                          : BANK_TRANSFER_CHANNELS
+                        ).map((ch) => (
+                          <option key={ch} value={ch}>
+                            {ch}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <span className="text-[11px] font-black text-[#0B261C] block pt-1">
+                      Upload Struk Screenshot Pembayaran <span className="text-red-600">*</span>
                     </span>
                     <input
                       type="file"
@@ -485,7 +561,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       >
                         <i className="fa-solid fa-cloud-arrow-up text-base text-[#0B261C]"></i>
                         <span className="font-black text-[#0B261C] text-[11px]">
-                          Upload Bukti Transfer / Screenshot QRIS
+                          Upload Struk Screenshot Pembayaran
                         </span>
                       </label>
                     )}
@@ -574,6 +650,78 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MODAL ZOOM BUKTI SCREENSHOT DI DALAM STRUK */}
+      {zoomProofOpen && (order.paymentProofImage || order.refundRequest?.proofImage) && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/95 flex flex-col p-3 animate-fade"
+          onClick={() => setZoomProofOpen(false)}
+        >
+          <div
+            className="max-w-md w-full mx-auto flex flex-col h-full space-y-2.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[#0B261C] border border-[#D4AF37] rounded-2xl p-3 text-white flex justify-between items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] font-black uppercase text-[#D4AF37] block">
+                  Cek Keaslian Struk Screenshot Pembayaran
+                </span>
+                <p className="text-xs font-black truncate mt-0.5">
+                  {order.customer} • {formatRupiah(order.total)}
+                </p>
+                <p className="text-[11px] text-emerald-200 font-bold truncate">
+                  Melalui: {order.paymentChannel || order.payMethod}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setZoomProofOpen(false)}
+                className="w-8 h-8 rounded-xl bg-white/15 text-white font-black text-xs shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center gap-1.5 bg-stone-900 border border-stone-700 p-2 rounded-xl text-xs font-black text-white">
+              <span className="text-[10px] text-stone-400 mr-1">Zoom:</span>
+              {[1, 1.5, 2, 2.5, 3].map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => setZoomLevel(z)}
+                  className={`px-2.5 py-1 rounded-lg transition ${
+                    zoomLevel === z
+                      ? 'bg-[#D4AF37] text-[#0B261C]'
+                      : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                  }`}
+                >
+                  {z}x
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-auto rounded-2xl border border-stone-700 bg-black flex items-center justify-center p-2">
+              <img
+                src={order.paymentProofImage || order.refundRequest?.proofImage}
+                alt="Zoom Bukti Pembayaran"
+                style={{
+                  transform: `scale(${zoomLevel})`,
+                  transformOrigin: 'top center',
+                }}
+                className="max-w-full h-auto object-contain transition-transform duration-150"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setZoomProofOpen(false)}
+              className="tactile-btn w-full bg-[#D4AF37] text-[#0B261C] font-black py-3 rounded-2xl text-xs"
+            >
+              Tutup Zoom Screenshot
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
