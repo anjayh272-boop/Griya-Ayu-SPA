@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    },
+    {
+      "source": "/((?!api/|assets/|icons/|manifest\\.json|sw\\.js|icon\\.svg|.*\\.png).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

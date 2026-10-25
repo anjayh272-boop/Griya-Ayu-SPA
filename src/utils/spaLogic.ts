@@ -797,7 +797,7 @@ export function saveFonnteToken(token: string): string {
 export const GRIYA_AYU_DEFAULT_THERAPIST = 'Rismawati, AIFMO-P (Terapis Utama Griya Ayu)';
 
 /**
- * Mengirim pesan WhatsApp melalui endpoint proxy backend (/api/send-message)
+ * Mengirim pesan WhatsApp melalui endpoint proxy backend (/api/send-otp)
  * yang meneruskan request ke VPS WhatsApp Gateway (http://104.234.26.109:2219/api/send-message).
  */
 export async function sendWhatsAppViaVpsGateway(
@@ -813,7 +813,7 @@ export async function sendWhatsAppViaVpsGateway(
   }
 
   try {
-    const response = await fetch('/api/send-message', {
+    const response = await fetch('/api/send-otp', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -833,7 +833,7 @@ export async function sendWhatsAppViaVpsGateway(
           data?.reason ||
           data?.detail ||
           data?.message ||
-          'Gagal mengirim pesan ke WhatsApp Gateway VPS.',
+          'Gagal mengirim pesan ke WhatsApp Gateway.',
         data,
       };
     }
@@ -855,13 +855,13 @@ export async function sendWhatsAppViaVpsGateway(
 }
 
 /**
- * Mengirim kode OTP 6 digit langsung ke WhatsApp pelanggan melalui proxy /api/send-message -> VPS Gateway.
+ * Mengirim kode OTP 6 digit langsung ke WhatsApp pelanggan melalui proxy /api/send-otp -> VPS Gateway.
  */
 export async function sendOtpWhatsApp(
   targetPhone: string,
   otpCode: string
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
-  const message = `Halo! Kode verifikasi OTP Masuk Griya Ayu Anda adalah: ${otpCode}. Jangan berikan kode ini kepada siapa pun.`;
+  const message = `Halo! Kode OTP Masuk Griya Ayu Anda adalah: ${otpCode}. Jangan bagikan kode ini kepada siapa pun.`;
   return sendWhatsAppViaVpsGateway(targetPhone, message);
 }
 

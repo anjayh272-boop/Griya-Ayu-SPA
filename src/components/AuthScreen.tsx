@@ -78,10 +78,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     return digits;
   };
 
-  // Fungsi Generate & Kirim Kode OTP 6 Digit via Proxy /api/send-otp -> VPS WhatsApp Gateway
+  // Fungsi Generate & Kirim Kode OTP 6 Digit via Serverless Proxy /api/send-otp -> VPS WhatsApp Gateway
   const handleSendOtpCode = async (rawPhoneInput: string) => {
-    const cleanPhone = normalizePhone(rawPhoneInput);
-    if (!cleanPhone || cleanPhone.length < 9) {
+    const nomorWhatsApp = normalizePhone(rawPhoneInput);
+    if (!nomorWhatsApp || nomorWhatsApp.length < 9) {
       onShowToast(
         'Nomor WhatsApp Belum Valid',
         'Mohon masukkan nomor HP / WhatsApp aktif (minimal 9 digit) terlebih dahulu sebelum mengirim kode OTP.'
@@ -92,34 +92,47 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     if (isSendingOtp) return;
 
     // 1. Generate kode OTP acak 6 digit
-    const randomSixDigitOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
     // 2. Simpan kode OTP di state untuk validasi input pengguna
-    setGeneratedOtp(randomSixDigitOtp);
-    setOtpTargetPhone(cleanPhone);
+    setGeneratedOtp(otpCode);
+    setOtpTargetPhone(nomorWhatsApp);
     setIsSendingOtp(true);
 
     try {
-      // 3. Panggil API /api/send-otp dengan nomor tujuan pelanggan & format pesan sesuai spesifikasi
-      const result = await sendOtpWhatsApp(cleanPhone, randomSixDigitOtp);
+      // 3. Panggil API Route Proxy /api/send-otp (sisi server) agar tidak terkena Mixed Content HTTPS -> HTTP
+      const response = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: nomorWhatsApp,
+          message: `Halo! Kode OTP Masuk Griya Ayu Anda adalah: ${otpCode}. Jangan bagikan kode ini kepada siapa pun.`,
+        }),
+      });
 
-      if (result.ok) {
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && (!data || data.status !== false)) {
         setOtpCooldown(45);
         onShowToast(
           'Kode OTP Terkirim! 📲',
-          `Kode verifikasi OTP 6 digit telah dikirim ke nomor WhatsApp ${cleanPhone}. Silakan periksa WhatsApp Anda dan masukkan kodenya pada kolom OTP.`
+          `Kode verifikasi OTP 6 digit telah dikirim ke nomor WhatsApp ${nomorWhatsApp}. Silakan periksa WhatsApp Anda dan masukkan kodenya pada kolom OTP.`
         );
       } else {
         onShowToast(
           'Gagal Mengirim OTP ⚠️',
-          result.detail ||
-            `Belum berhasil mengirim OTP ke nomor ${cleanPhone}. Pastikan nomor WhatsApp aktif dan coba lagi.`
+          data?.error ||
+            data?.reason ||
+            data?.detail ||
+            `Belum berhasil mengirim OTP ke nomor ${nomorWhatsApp}. Pastikan nomor WhatsApp aktif dan coba lagi.`
         );
       }
-    } catch {
+    } catch (err) {
       onShowToast(
         'Gagal Mengirim OTP ⚠️',
-        `Terjadi kendala jaringan saat menghubungi server WhatsApp Gateway untuk nomor ${cleanPhone}.`
+        err instanceof Error
+          ? err.message
+          : `Terjadi kendala jaringan saat mengirim kode OTP ke nomor ${nomorWhatsApp}.`
       );
     } finally {
       setIsSendingOtp(false);

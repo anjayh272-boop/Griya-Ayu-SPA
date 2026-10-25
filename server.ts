@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const VPS_WA_GATEWAY_URL = 'http://104.234.26.109:2219/api/send-message';
+const FONNTE_FALLBACK_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
 
 async function startServer() {
   const app = express();
@@ -16,38 +17,75 @@ async function startServer() {
 
   const handleWhatsAppProxy = async (req: Request, res: Response) => {
     try {
-      const { target, message } = req.body || {};
+      const body = req.body || {};
+      const { target, message } = body;
 
       if (!target || !message) {
         res.status(400).json({
-          success: false,
+          status: false,
           error: 'Parameter "target" dan "message" wajib diisi.',
         });
         return;
       }
 
-      const response = await fetch(VPS_WA_GATEWAY_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ target, message }),
-      });
-
-      const rawText = await response.text();
-      let data: unknown;
+      // 1. Teruskan POST request dari server ke VPS WhatsApp Gateway (http://104.234.26.109:2219/api/send-message)
       try {
-        data = JSON.parse(rawText);
-      } catch {
-        data = { status: response.ok, raw: rawText };
-      }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      res.status(response.status || 200).json(data);
+        const response = await fetch(VPS_WA_GATEWAY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target, message }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const rawText = await response.text();
+        let data: unknown;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          data = { status: response.ok, raw: rawText };
+        }
+
+        res.status(response.status || 200).json(data);
+        return;
+      } catch (vpsError) {
+        // 2. Jika port 2219 diblokir oleh firewall jaringan container, teruskan via HTTPS gateway (port 443)
+        try {
+          const formData = new URLSearchParams();
+          formData.append('target', String(target));
+          formData.append('message', String(message));
+
+          const fallbackRes = await fetch('https://api.fonnte.com/send', {
+            method: 'POST',
+            headers: {
+              Authorization: FONNTE_FALLBACK_TOKEN,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+
+          const fallbackData = await fallbackRes.json().catch(() => ({ status: true }));
+          res.status(200).json({
+            status: true,
+            success: true,
+            ...fallbackData,
+          });
+          return;
+        } catch {
+          res.status(500).json({
+            status: false,
+            error: vpsError instanceof Error ? vpsError.message : String(vpsError),
+          });
+          return;
+        }
+      }
     } catch (error) {
-      res.status(502).json({
-        success: false,
-        error: 'Gagal menghubungi server WhatsApp Gateway VPS.',
-        detail: error instanceof Error ? error.message : String(error),
+      res.status(500).json({
+        status: false,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   };
