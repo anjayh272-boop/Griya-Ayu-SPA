@@ -202,78 +202,62 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       existingUser = cloudUser;
     }
 
-    // 3. Validasi jika pelanggan login menggunakan Kode OTP WhatsApp (6 Digit)
-    if (cleanOtp.length > 0 || generatedOtp.length > 0) {
-      if (!generatedOtp || otpTargetPhone !== cleanPhone) {
-        onShowToast(
-          'Kirim Kode OTP Dahulu',
-          `Silakan klik tombol "Kirim Kode OTP" untuk nomor ${cleanPhone} terlebih dahulu.`
-        );
-        return;
-      }
-
-      if (cleanOtp !== generatedOtp) {
-        onShowToast(
-          'Kode OTP Tidak Sesuai ❌',
-          'Kode verifikasi OTP 6 digit yang Anda masukkan tidak sesuai. Silakan cek kembali pesan WhatsApp Anda.'
-        );
-        return;
-      }
-
-      // Jika OTP cocok: apabila pelanggan belum terdaftar, buatkan akun member otomatis (+20 Poin) atau gunakan akun yang ada
-      if (!existingUser) {
-        const newCustomer: User = {
-          name: `Member ${cleanPhone.slice(-4)}`,
-          phone: cleanPhone,
-          pass: cleanPass || '123456',
-          points: 20,
-          role: 'customer',
-        };
-        const updatedList = [...usersList, newCustomer];
-        saveCustomersPersistently(updatedList);
-        await syncCustomerToCloud(newCustomer);
-        saveActiveSession(newCustomer, false, true);
-        setGeneratedOtp('');
-        setOtpInput('');
-        onRegisterSuccess(newCustomer);
-        return;
-      }
-
-      saveActiveSession(existingUser, false, true);
-      setGeneratedOtp('');
-      setOtpInput('');
-      onLoginSuccess(existingUser, false);
-      return;
-    }
-
-    // 4. Fallback: Jika pelanggan login menggunakan Kata Sandi tanpa OTP
-    if (!cleanPass) {
-      onShowToast(
-        'Masukkan Kode OTP atau Kata Sandi',
-        'Silakan klik "Kirim Kode OTP" untuk masuk dengan kode verifikasi WhatsApp, atau masukkan Kata Sandi akun Anda.'
-      );
-      return;
-    }
-
     if (!existingUser) {
       setRegPhone(loginPhone);
       setAuthMode('register');
       onShowToast(
         'Nomor Belum Terdaftar',
-        `Nomor ${loginPhone} belum terdaftar sebagai member Griya Ayu.\n\nSilakan klik "Kirim Kode OTP" atau lengkapi pendaftaran pada tab "Daftar Baru" (Gratis Bonus +20 Poin!).`
+        `Nomor ${cleanPhone} belum terdaftar sebagai member Griya Ayu.\n\nSilakan lengkapi pendaftaran pada tab "Daftar Baru" (Gratis Bonus +20 Poin!).`
+      );
+      return;
+    }
+
+    // 3. Alur Login Wajib Kata Sandi + Kode OTP 6 Digit
+    if (!cleanPass) {
+      onShowToast(
+        'Kata Sandi Wajib Diisi 🔒',
+        'Mohon masukkan Kata Sandi akun Anda beserta 6 digit Kode OTP dari WhatsApp.'
+      );
+      return;
+    }
+
+    if (!generatedOtp || otpTargetPhone !== cleanPhone) {
+      onShowToast(
+        'Kirim Kode OTP Dahulu 📲',
+        `Silakan klik tombol "Kirim Kode OTP" terlebih dahulu untuk menerima 6 digit kode verifikasi di WhatsApp ${cleanPhone}.`
+      );
+      return;
+    }
+
+    if (!cleanOtp || cleanOtp.length !== 6) {
+      onShowToast(
+        'Kode OTP Wajib Diisi 📲',
+        `Mohon masukkan 6 digit Kode OTP yang telah dikirim ke nomor WhatsApp ${cleanPhone}.`
       );
       return;
     }
 
     if (existingUser.pass !== cleanPass) {
       onShowToast(
-        'Kata Sandi Salah',
-        'Kata sandi yang Anda masukkan tidak sesuai. Anda juga bisa masuk dengan mudah menggunakan tombol "Kirim Kode OTP" ke WhatsApp.'
+        'Kata Sandi Salah ❌',
+        'Kata sandi yang Anda masukkan tidak sesuai. Silakan periksa kembali kata sandi Anda.'
       );
       return;
     }
 
+    if (cleanOtp !== generatedOtp) {
+      onShowToast(
+        'Kode OTP Tidak Sesuai ❌',
+        'Kode verifikasi OTP 6 digit yang Anda masukkan tidak sesuai. Silakan periksa kembali pesan WhatsApp Anda.'
+      );
+      return;
+    }
+
+    // 4. Jika Kata Sandi DAN Kode OTP 6 digit keduanya benar:
+    // Simpan sesi di localStorage ('griya_customer_session') selama 3 hari dan arahkan ke dashboard pelanggan
     saveActiveSession(existingUser, false, true);
+    setGeneratedOtp('');
+    setOtpInput('');
     onLoginSuccess(existingUser, false);
   };
 
@@ -301,43 +285,34 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Validasi OTP jika kode OTP telah dikirim atau diisi pada pendaftaran
-    if (generatedOtp && otpTargetPhone === cleanPhone) {
-      if (!cleanOtp) {
-        onShowToast(
-          'Masukkan Kode OTP',
-          `Silakan masukkan 6 digit Kode OTP yang telah dikirim ke WhatsApp ${cleanPhone}.`
-        );
-        return;
-      }
-      if (cleanOtp !== generatedOtp) {
-        onShowToast(
-          'Kode OTP Tidak Sesuai ❌',
-          'Kode verifikasi OTP 6 digit yang Anda masukkan salah. Silakan periksa kembali pesan WhatsApp Anda.'
-        );
-        return;
-      }
-    } else if (cleanOtp) {
+    if (!cleanPass || cleanPass.length < 6) {
       onShowToast(
-        'Kirim Kode OTP Dahulu',
-        'Silakan klik tombol "Kirim Kode OTP" terlebih dahulu untuk mendapatkan kode verifikasi WhatsApp.'
+        'Kata Sandi Wajib Diisi',
+        'Mohon buat kata sandi minimal 6 karakter.'
       );
       return;
     }
 
-    const finalPass = cleanPass || '123456';
-    if (cleanPass && cleanPass.length < 6) {
-      onShowToast(
-        'Kata Sandi Terlalu Pendek',
-        'Kata sandi minimal harus terdiri dari 6 karakter.'
-      );
-      return;
-    }
-
-    if (cleanPass && cleanConfirm && cleanPass !== cleanConfirm) {
+    if (cleanPass !== cleanConfirm) {
       onShowToast(
         'Konfirmasi Sandi Berbeda',
         'Kata sandi dan ulangi kata sandi harus sama persis.'
+      );
+      return;
+    }
+
+    if (!generatedOtp || otpTargetPhone !== cleanPhone) {
+      onShowToast(
+        'Kirim Kode OTP Dahulu 📲',
+        `Silakan klik tombol "Kirim Kode OTP" terlebih dahulu untuk memverifikasi nomor WhatsApp ${cleanPhone}.`
+      );
+      return;
+    }
+
+    if (!cleanOtp || cleanOtp !== generatedOtp) {
+      onShowToast(
+        'Kode OTP Tidak Sesuai ❌',
+        'Kode verifikasi OTP 6 digit yang Anda masukkan belum sesuai. Silakan periksa pesan WhatsApp Anda.'
       );
       return;
     }
@@ -361,17 +336,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     if (already) {
-      // Jika sudah terdaftar namun sudah verifikasi OTP dengan benar, langsung loginkan
-      if (generatedOtp && otpTargetPhone === cleanPhone && cleanOtp === generatedOtp) {
-        saveActiveSession(already, false, true);
-        setGeneratedOtp('');
-        setOtpInput('');
-        onLoginSuccess(already, false);
-        return;
-      }
       onShowToast(
         'Nomor Sudah Terdaftar',
-        `Nomor ${cleanPhone} sudah terdaftar atas nama ${already.name}. Silakan langsung Masuk (Login) memakai Kode OTP atau kata sandi Anda.`
+        `Nomor ${cleanPhone} sudah terdaftar atas nama ${already.name}. Silakan masuk melalui tab Masuk (Login) dengan Kata Sandi dan Kode OTP Anda.`
       );
       setAuthMode('login');
       setLoginPhone(cleanPhone);
@@ -382,7 +349,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     const newCustomer: User = {
       name: cleanName,
       phone: cleanPhone,
-      pass: finalPass,
+      pass: cleanPass,
       points: 20,
       role: 'customer',
     };
@@ -400,7 +367,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const handleForgotPassword = () => {
     onShowToast(
       'Bantuan Reset Kata Sandi',
-      'Anda dapat langsung masuk menggunakan tombol "Kirim Kode OTP" ke WhatsApp tanpa kata sandi, atau hubungi Admin Rismawati melalui WhatsApp.',
+      'Jika Anda lupa kata sandi akun member Griya Ayu, silakan hubungi Admin Rismawati melalui WhatsApp untuk bantuan reset kata sandi.',
       'https://wa.me/6287765573476?text=Halo%20Admin%20Griya%20Ayu%2C%20saya%20ingin%20bantuan%20reset%20kata%20sandi%20akun%20member%20saya.'
     );
   };
@@ -458,10 +425,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <form onSubmit={handleLogin} className="space-y-2.5 animate-page-enter">
             <div className="bg-emerald-950/5 border border-emerald-900/15 px-3 py-2 rounded-xl">
               <h2 className="text-xs font-black text-[#0B261C]">
-                Verifikasi & Masuk Pelanggan
+                Verifikasi Masuk (Wajib Sandi + OTP WhatsApp)
               </h2>
               <p className="text-[10px] text-stone-600 leading-snug mt-0.5">
-                Masukkan nomor WhatsApp Anda lalu klik <b>Kirim Kode OTP</b> untuk menerima 6 digit kode verifikasi langsung di WhatsApp.
+                Masukkan Nomor WhatsApp, klik <b>Kirim Kode OTP</b>, lalu isi <b>Kata Sandi</b> dan <b>6 digit Kode OTP</b> yang dikirim ke WhatsApp Anda.
               </p>
             </div>
 
@@ -471,7 +438,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 htmlFor="loginPhoneInput"
                 className="text-[10px] font-black text-stone-700 uppercase block"
               >
-                Nomor Telepon / WhatsApp
+                Nomor Telepon / WhatsApp <span className="text-red-600">*</span>
               </label>
               <div className="flex gap-1.5">
                 <div className="relative flex-1 min-w-0">
@@ -517,44 +484,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
             </div>
 
-            {/* Input Kode Verifikasi OTP 6 Digit */}
-            {!isAdminPhoneInput && (
-              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-2.5 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label
-                    htmlFor="loginOtpInput"
-                    className="text-[10px] font-black text-emerald-950 uppercase flex items-center gap-1"
-                  >
-                    <i className="fa-solid fa-shield-check text-emerald-700"></i>
-                    <span>Kode Verifikasi OTP (6 Digit)</span>
-                  </label>
-                  {generatedOtp && otpTargetPhone === normalizePhone(loginPhone) && (
-                    <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      ✓ OTP Terkirim ke WA
-                    </span>
-                  )}
-                </div>
-                <input
-                  id="loginOtpInput"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={otpInput}
-                  onChange={(e) => setOtpInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                  placeholder="Ketik 6 digit kode OTP dari WhatsApp..."
-                  className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-center font-mono text-sm font-black tracking-[0.25em] text-[#0B261C] focus:outline-none focus:border-[#0B261C] focus:ring-1 focus:ring-[#0B261C]"
-                />
-              </div>
-            )}
-
-            {/* Input Kata Sandi (Wajib untuk Admin / Opsional untuk Pelanggan jika memakai OTP) */}
+            {/* Input Kata Sandi (Wajib untuk Pelanggan & Admin) */}
             <div>
               <div className="flex justify-between items-center mb-1">
                 <label
                   htmlFor="loginPassInput"
                   className="text-[10px] font-black text-stone-700 uppercase"
                 >
-                  {isAdminPhoneInput ? 'Kata Sandi Admin' : 'Kata Sandi (Opsional jika pakai OTP)'}
+                  {isAdminPhoneInput ? 'Kata Sandi Admin *' : 'Kata Sandi Akun *'}
                 </label>
                 <button
                   type="button"
@@ -576,7 +513,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   placeholder={
                     isAdminPhoneInput
                       ? 'Masukkan kata sandi Admin...'
-                      : 'Kosongkan jika masuk dengan Kode OTP...'
+                      : 'Masukkan kata sandi akun Anda...'
                   }
                   className="w-full pl-8 pr-9 py-2 bg-white border border-stone-300 rounded-xl text-xs font-bold text-stone-900 focus:outline-none focus:border-[#0B261C] focus:ring-1 focus:ring-[#0B261C] transition"
                 />
@@ -595,13 +532,43 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </div>
             </div>
 
+            {/* Input Kode Verifikasi OTP 6 Digit (Wajib untuk Pelanggan) */}
+            {!isAdminPhoneInput && (
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="loginOtpInput"
+                    className="text-[10px] font-black text-emerald-950 uppercase flex items-center gap-1"
+                  >
+                    <i className="fa-solid fa-shield-check text-emerald-700"></i>
+                    <span>Kode Verifikasi OTP (6 Digit Wajib) *</span>
+                  </label>
+                  {generatedOtp && otpTargetPhone === normalizePhone(loginPhone) && (
+                    <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      ✓ OTP Terkirim ke WA
+                    </span>
+                  )}
+                </div>
+                <input
+                  id="loginOtpInput"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otpInput}
+                  onChange={(e) => setOtpInput(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder="Ketik 6 digit kode OTP dari WhatsApp..."
+                  className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-xl text-center font-mono text-sm font-black tracking-[0.25em] text-[#0B261C] focus:outline-none focus:border-[#0B261C] focus:ring-1 focus:ring-[#0B261C]"
+                />
+              </div>
+            )}
+
             {/* Tombol Masuk */}
             <button
               type="submit"
               className="tactile-btn gold-shimmer-card w-full bg-gradient-to-r from-[#D4AF37] via-amber-400 to-amber-500 text-[#0B261C] font-black py-2.5 rounded-xl shadow-md text-xs uppercase tracking-wider flex items-center justify-center gap-2"
             >
               <i className="fa-solid fa-unlock-keyhole"></i>
-              <span>{otpInput.length === 6 ? 'Verifikasi OTP & Masuk' : 'Masuk Sekarang'}</span>
+              <span>Verifikasi Sandi + OTP &amp; Masuk</span>
             </button>
 
             <p className="text-[11px] text-center text-stone-600 font-medium pt-0.5">

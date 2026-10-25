@@ -10,11 +10,10 @@ import {
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
+  sendOtpWhatsApp,
 } from '../utils/spaLogic.ts';
 import { syncCustomerToCloud } from '../utils/cloudSync.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
-
-const FONNTE_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
 
 interface AccountPanelProps {
   currentUser: User;
@@ -172,33 +171,24 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
     setOtpStatusMessage('');
 
     try {
-      const formData = new FormData();
-      formData.append('target', currentUser.phone);
-      formData.append(
-        'message',
-        `*GRIYA AYU SPA* - Kode verifikasi pengaturan sandi Anda adalah: *${code}*`
-      );
-
-      await fetch('https://api.fonnte.com/send', {
-        method: 'POST',
-        headers: {
-          Authorization: FONNTE_TOKEN,
-        },
-        body: formData,
-      });
-
-      setOtpSent(true);
-      setOtpStatusMessage('Kode verifikasi telah dikirim langsung ke WhatsApp Anda!');
-      onShowToast(
-        'Kode OTP Terkirim! 📲',
-        'Kode verifikasi telah dikirim langsung ke WhatsApp Anda!'
-      );
+      const result = await sendOtpWhatsApp(currentUser.phone, code);
+      if (result.ok) {
+        setOtpSent(true);
+        setOtpStatusMessage('Kode verifikasi telah dikirim langsung ke WhatsApp Anda!');
+        onShowToast(
+          'Kode OTP Terkirim! 📲',
+          'Kode verifikasi telah dikirim langsung ke WhatsApp Anda!'
+        );
+      } else {
+        onShowToast(
+          'Gagal Mengirim OTP ⚠️',
+          result.detail || 'Belum berhasil mengirim kode OTP ke WhatsApp Anda.'
+        );
+      }
     } catch {
-      setOtpSent(true);
-      setOtpStatusMessage('Kode verifikasi telah dikirim langsung ke WhatsApp Anda!');
       onShowToast(
-        'Kode OTP Terkirim! 📲',
-        'Kode verifikasi telah dikirim langsung ke WhatsApp Anda!'
+        'Gagal Mengirim OTP ⚠️',
+        'Terjadi kendala saat menghubungi server WhatsApp Gateway.'
       );
     } finally {
       setOtpSending(false);
