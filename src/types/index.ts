@@ -103,6 +103,9 @@ export interface BookingOrder {
   verifiedDateIso?: string;
   paymentProofImage?: string;
   paymentChannel?: string;
+  healthNote?: string;
+  rescheduledAt?: string;
+  previousSchedule?: string;
   refundRequest?: RefundRequestInfo;
   refundRejectedReason?: string;
 }
@@ -119,7 +122,8 @@ export interface AppNotification {
     | 'points_reward'
     | 'refund_requested'
     | 'refund_approved'
-    | 'refund_rejected';
+    | 'refund_rejected'
+    | 'booking_rescheduled';
   title: string;
   message: string;
   createdAt: string;

@@ -27,7 +27,8 @@ interface ReceiptModalProps {
     orderId: number,
     methodType: PaymentMethodType,
     paymentProofImage?: string,
-    paymentChannel?: string
+    paymentChannel?: string,
+    healthNote?: string
   ) => void;
   onFailFromReceipt?: (orderId: number, methodType: PaymentMethodType) => void;
   onCopyText?: (text: string, label: string) => void;
@@ -47,6 +48,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [selectedChannel, setSelectedChannel] = useState<string>(QRIS_PAYMENT_CHANNELS[0]);
   const [receiptProofImage, setReceiptProofImage] = useState<string>('');
   const [receiptProofError, setReceiptProofError] = useState<string>('');
+  const [receiptHealthNote, setReceiptHealthNote] = useState<string>('');
   const [zoomProofOpen, setZoomProofOpen] = useState<boolean>(false);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
@@ -63,11 +65,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         setSelectedChannel(order.paymentChannel || BANK_TRANSFER_CHANNELS[0]);
       }
       setReceiptProofImage(order.paymentProofImage || '');
+      setReceiptHealthNote(order.healthNote || '');
       setReceiptProofError('');
       setZoomProofOpen(false);
       setZoomLevel(1);
     }
-  }, [order?.id, order?.payMethodType, order?.paymentProofImage]);
+  }, [order?.id, order?.payMethodType, order?.paymentProofImage, order?.healthNote]);
 
   useEffect(() => {
     if (!order) return;
@@ -145,7 +148,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         order.id,
         selectedType,
         isCashSelected ? undefined : receiptProofImage,
-        isCashSelected ? 'Cash / Bayar di Tempat' : selectedChannel
+        isCashSelected ? 'Cash / Bayar di Tempat' : selectedChannel,
+        receiptHealthNote.trim() || undefined
       );
     }
   };
@@ -262,12 +266,30 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   {order.items}
                 </span>
               </div>
+              {order.healthNote && (
+                <div className="bg-amber-50/80 border border-amber-200 px-2.5 py-1.5 rounded-lg text-[10px]">
+                  <span className="font-black text-[#0B261C] block">
+                    🩺 Catatan Keluhan / Fokus Pijat:
+                  </span>
+                  <p className="text-stone-800 font-semibold leading-snug mt-0.5">
+                    {order.healthNote}
+                  </p>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-stone-500">Tanggal & Jam:</span>
                 <span className="font-black text-amber-900 bg-amber-100 px-2 py-0.5 rounded">
                   {order.datePretty} • {order.time} WIB
                 </span>
               </div>
+              {order.previousSchedule && (
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-stone-400">Jadwal Sebelum Reschedule:</span>
+                  <span className="font-bold text-stone-500 line-through">
+                    {order.previousSchedule}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between items-start gap-2">
                 <span className="text-stone-500 flex-shrink-0">Pembayaran Melalui:</span>
                 <span className="font-extrabold text-[#0B261C] text-right">

@@ -5,6 +5,7 @@ import {
   formatCountdown,
   isOrderLockedStatus,
   compressImageFileToDataUrl,
+  sendBookingSummaryWhatsApp,
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_QRIS_MERCHANT,
@@ -23,7 +24,8 @@ interface PaymentModalProps {
     orderId: number,
     methodType: PaymentMethodType,
     paymentProofImage?: string,
-    paymentChannel?: string
+    paymentChannel?: string,
+    healthNote?: string
   ) => void;
   onPaymentFailed: (orderId: number, methodType: PaymentMethodType) => void;
   onCopyText: (text: string, label: string) => void;
@@ -44,6 +46,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [remainingMs, setRemainingMs] = useState<number>(20 * 60 * 1000);
   const [proofImage, setProofImage] = useState<string>('');
   const [proofError, setProofError] = useState<string>('');
+  const [healthNote, setHealthNote] = useState<string>('');
 
   useEffect(() => {
     if (!order) return;
@@ -58,6 +61,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       setSelectedChannel(order.paymentChannel || BANK_TRANSFER_CHANNELS[0]);
     }
     setProofImage(order.paymentProofImage || '');
+    setHealthNote(order.healthNote || '');
     setProofError('');
     setLocalStatus(
       isOrderLockedStatus(order)
@@ -131,11 +135,22 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       }
     }
     setLocalStatus('Locked');
+    const cleanHealthNote = healthNote.trim() || undefined;
+    const confirmedOrder: BookingOrder = {
+      ...order,
+      payMethodType: activeMethodType,
+      payMethod: isCashMethod ? 'Cash / Bayar di Tempat' : selectedChannel,
+      paymentStatus: isCashMethod ? 'Booking Cash (Bayar di Lokasi)' : 'Lunas',
+      status: 'Paid',
+      healthNote: cleanHealthNote || order.healthNote,
+    };
+    void sendBookingSummaryWhatsApp(confirmedOrder);
     onPaymentSuccess(
       order.id,
       activeMethodType,
       isCashMethod ? undefined : proofImage,
-      isCashMethod ? 'Cash / Bayar di Tempat' : selectedChannel
+      isCashMethod ? 'Cash / Bayar di Tempat' : selectedChannel,
+      cleanHealthNote
     );
   };
 
@@ -481,6 +496,30 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </p>
           </div>
         )}
+
+        {/* FORM CATATAN KELUHAN FISIK / FOKUS PIJAT (OPSIONAL) */}
+        <div className="bg-white p-3.5 rounded-2xl border border-stone-200 space-y-1.5 shadow-2xs">
+          <label
+            htmlFor="paymentModalHealthNote"
+            className="text-[11px] font-black text-[#0B261C] flex items-center justify-between gap-2"
+          >
+            <span className="flex items-center gap-1.5">
+              <i className="fa-solid fa-notes-medical text-emerald-700"></i>
+              <span>Catatan Keluhan / Fokus Pijat</span>
+            </span>
+            <span className="text-[9px] font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded">
+              Opsional
+            </span>
+          </label>
+          <textarea
+            id="paymentModalHealthNote"
+            rows={2}
+            value={healthNote}
+            onChange={(e) => setHealthNote(e.target.value)}
+            placeholder="Catatan Keluhan / Fokus Pijat (Contoh: Nyeri bahu kanan, cedera engkel ringan, hindari area pinggang)"
+            className="w-full p-2.5 rounded-xl bg-stone-50 border border-stone-300 text-stone-900 text-xs font-medium focus:outline-none focus:border-[#0B261C]"
+          />
+        </div>
 
         {/* SATU TOMBOL UTAMA KONFIRMASI DINAMIS SESUAI METODE PEMBAYARAN */}
         <div className="pt-1 space-y-2">

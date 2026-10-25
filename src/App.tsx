@@ -50,6 +50,9 @@ import {
   GRIYA_AYU_MAPS_URL,
   GRIYA_AYU_DEFAULT_THERAPIST,
   sendBookingSummaryWhatsApp,
+  sendCancellationOrRefundWhatsApp,
+  sendRescheduleBookingWhatsApp,
+  checkBookingRescheduleEligibility,
 } from './utils/spaLogic.ts';
 import {
   subscribeToGlobalCloudState,
@@ -816,6 +819,7 @@ export default function App() {
     itemsSummary: string;
     pointsEarned: number;
     pointsRedeemedCost: number;
+    healthNote?: string;
   }) => {
     if (!currentUser) return;
 
@@ -840,6 +844,7 @@ export default function App() {
       status: 'Pending_Payment',
       createdAt: nowFormatted(),
       therapist: GRIYA_AYU_DEFAULT_THERAPIST,
+      healthNote: draft.healthNote?.trim() || undefined,
     };
 
     updateBookingsAndPersist((prev) => [newPendingBooking, ...prev]);
@@ -897,6 +902,7 @@ export default function App() {
     paymentChannel?: string;
     existingOrderId?: number | null;
     silentReceipt?: boolean;
+    healthNote?: string;
   }): BookingOrder | null => {
     if (!currentUser) return null;
 
@@ -995,6 +1001,7 @@ export default function App() {
         : getTodayIso(),
       paymentProofImage: draft.paymentProofImage || existingOrder?.paymentProofImage,
       paymentChannel: resolvedChannel,
+      healthNote: draft.healthNote?.trim() || existingOrder?.healthNote,
     };
 
     updateBookingsAndPersist((prev) => {
@@ -1006,8 +1013,8 @@ export default function App() {
     });
 
     if (draft.markAsPaid) {
-      // Kirim notifikasi ringkasan booking otomatis ke WhatsApp pelanggan via VPS Gateway (/api/send-otp)
-      void sendBookingSummaryWhatsApp(newBooking);
+      // Kirim notifikasi konfirmasi reservasi otomatis ke WhatsApp pelanggan & Admin via WhatsApp Gateway
+      void sendBookingSummaryWhatsApp(newBooking, adminProfile?.phone);
 
       const waConfirm = buildAdminWaConfirmationMessage(newBooking);
       const adminNotif: AppNotification = {
@@ -1149,7 +1156,8 @@ export default function App() {
     orderId: number,
     methodType: PaymentMethodType,
     paymentProofImage?: string,
-    paymentChannel?: string
+    paymentChannel?: string,
+    healthNote?: string
   ) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
@@ -1214,12 +1222,13 @@ export default function App() {
       verifiedDateIso: isCash ? targetOrder.verifiedDateIso : getTodayIso(),
       paymentProofImage: paymentProofImage || targetOrder.paymentProofImage,
       paymentChannel: resolvedChannel,
+      healthNote: healthNote?.trim() || targetOrder.healthNote,
     };
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi ringkasan booking otomatis ke WhatsApp pelanggan via VPS Gateway (/api/send-otp)
-    void sendBookingSummaryWhatsApp(updatedOrder);
+    // Kirim notifikasi konfirmasi reservasi otomatis ke WhatsApp pelanggan & Admin via WhatsApp Gateway
+    void sendBookingSummaryWhatsApp(updatedOrder, adminProfile?.phone);
 
     // Buat Notifikasi Otomatis untuk Admin beserta Kata-Kata Konfirmasi WA Pelanggan
     const waConfirm = buildAdminWaConfirmationMessage(updatedOrder);
@@ -1280,6 +1289,79 @@ export default function App() {
   const handleCopyText = (text: string, label: string) => {
     navigator.clipboard?.writeText(text);
     showToast('Berhasil Disalin', `${label} telah disalin ke papan klip.`);
+  };
+
+  // Reschedule Mandiri oleh Pelanggan (tanpa ubah layanan & tanpa bayar ulang, maksimal 4 jam sebelum jadwal awal)
+  const handleRescheduleBooking = (
+    orderId: number,
+    newDateIso: string,
+    newDatePretty: string,
+    newTimeSlot: string
+  ) => {
+    const targetOrder = bookings.find((b) => b.id === orderId);
+    if (!targetOrder) return;
+
+    const eligibility = checkBookingRescheduleEligibility(
+      targetOrder.date,
+      targetOrder.time
+    );
+    if (!eligibility.canReschedule) {
+      showToast(
+        'Batas Waktu Reschedule Terlewat ⏳',
+        eligibility.remainingLabel ||
+          'Reschedule mandiri hanya dapat dilakukan maksimal 4 jam sebelum jadwal awal.'
+      );
+      return;
+    }
+
+    const oldScheduleLabel = `${targetOrder.datePretty} • Jam ${targetOrder.time} WIB`;
+    const updatedOrder: BookingOrder = {
+      ...targetOrder,
+      previousSchedule: oldScheduleLabel,
+      date: newDateIso,
+      datePretty: newDatePretty,
+      time: newTimeSlot,
+      rescheduledAt: nowFormatted(),
+    };
+
+    updateBookingsAndPersist((prev) =>
+      prev.map((b) => (b.id === orderId ? updatedOrder : b))
+    );
+
+    // Kirim notifikasi WhatsApp pembaruan jadwal ke pelanggan & Admin via WhatsApp Gateway
+    void sendRescheduleBookingWhatsApp(updatedOrder, adminProfile?.phone);
+
+    const adminNotif: AppNotification = {
+      id: Date.now() + 1,
+      target: 'admin',
+      type: 'booking_rescheduled',
+      title: `📅 Reschedule Mandiri — ${updatedOrder.customer} (#${updatedOrder.id})`,
+      message: `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) mengubah jadwal reservasi #${updatedOrder.id} dari [${oldScheduleLabel}] menjadi [${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB]. Slot lama otomatis dibuka kembali.`,
+      createdAt: nowFormatted(),
+      read: false,
+      orderId: updatedOrder.id,
+      customerName: updatedOrder.customer,
+      customerWa: updatedOrder.wa,
+    };
+
+    const customerNotif: AppNotification = {
+      id: Date.now() + 2,
+      target: 'customer',
+      targetPhone: updatedOrder.wa,
+      type: 'booking_rescheduled',
+      title: `📅 Jadwal Reservasi #${updatedOrder.id} Berhasil Diubah`,
+      message: `Jadwal reservasi Anda untuk layanan "${updatedOrder.items}" telah diubah ke ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB. Notifikasi konfirmasi juga telah dikirim ke WhatsApp Anda.`,
+      createdAt: nowFormatted(),
+      read: false,
+      orderId: updatedOrder.id,
+    };
+
+    addNotificationsAndSync([adminNotif, customerNotif]);
+    triggerCelebration(`Jadwal Baru ${updatedOrder.time} WIB!`);
+    showToast(
+      'Jadwal Berhasil Diubah 📅',
+      `Reservasi #${updatedOrder.id} berhasil dipindahkan ke ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB. Notifikasi WhatsApp telah dikirim ke nomor Anda.`
+    );
   };
 
   // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi Lunas & Terkonfirmasi
@@ -1438,6 +1520,9 @@ export default function App() {
         prev.map((b) => (b.id === orderId ? cancelledCashOrder : b))
       );
 
+      // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan & salinan ringkas ke WA Admin
+      void sendCancellationOrRefundWhatsApp(cancelledCashOrder, adminProfile?.phone);
+
       const adminNotif: AppNotification = {
         id: Date.now() + 1,
         target: 'admin',
@@ -1483,6 +1568,9 @@ export default function App() {
     };
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+
+    // Kirim notifikasi pembatalan & proses refund otomatis ke WhatsApp pelanggan & salinan ringkas ke WA Admin
+    void sendCancellationOrRefundWhatsApp(updatedOrder, adminProfile?.phone);
 
     const waToAdminUrl = buildCustomerToAdminRefundWaMessage(updatedOrder);
 
@@ -1580,6 +1668,9 @@ export default function App() {
     };
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
+
+    // Kirim notifikasi refund selesai otomatis ke WhatsApp pelanggan & salinan ringkas ke WA Admin
+    void sendCancellationOrRefundWhatsApp(updatedOrder, adminProfile?.phone);
 
     const waMsg = buildAdminApproveRefundWaMessage(updatedOrder);
     const customerNotif: AppNotification = {
@@ -2032,6 +2123,7 @@ export default function App() {
             onOpenPaymentModal={handleOpenPaymentModal}
             onConfirmWizardBooking={handleConfirmWizardBooking}
             onRequestRefund={handleRequestRefund}
+            onRescheduleBooking={handleRescheduleBooking}
             onRedeemPointReward={handleRedeemPointReward}
             onCopyText={handleCopyText}
             onViewReceipt={(order) => setReceiptOrderId(order.id)}

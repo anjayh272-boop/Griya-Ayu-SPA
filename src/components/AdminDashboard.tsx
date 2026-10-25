@@ -1215,7 +1215,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     )}
 
                     {/* Detail Pelanggan, Layanan, & Jadwal (Ukuran Font Jelas & Mudah Dibaca) */}
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-sm font-black text-[#0B261C]">{b.customer}</span>
                         <span className="text-xs text-stone-600 font-mono font-semibold">
@@ -1232,6 +1232,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {b.time} WIB
                         </b>
                       </p>
+                      {b.previousSchedule && (
+                        <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5">
+                          <i className="fa-solid fa-calendar-check text-amber-700"></i>
+                          <span>
+                            Reschedule dari jadwal awal: <s className="text-stone-500">{b.previousSchedule}</s>
+                          </span>
+                        </p>
+                      )}
+                      {b.healthNote && (
+                        <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-2.5 text-xs space-y-0.5">
+                          <span className="text-[11px] font-black text-[#0B261C] flex items-center gap-1.5">
+                            <i className="fa-solid fa-notes-medical text-emerald-800"></i>
+                            <span>Catatan Keluhan / Fokus Pijat:</span>
+                          </span>
+                          <p className="text-stone-800 font-semibold leading-snug">
+                            {b.healthNote}
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     {/* Info Metode Pembayaran, Pembayaran Melalui Apa, & Struk Screenshot Pelanggan */}

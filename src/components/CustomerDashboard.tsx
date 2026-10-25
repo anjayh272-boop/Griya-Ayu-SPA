@@ -25,6 +25,7 @@ import {
   isOrderLockedStatus,
   getPaymentMethodDetails,
   checkBookingRefundEligibility,
+  checkBookingRescheduleEligibility,
   compressImageFileToDataUrl,
   buildCustomerBookingWaToAdminMessage,
   buildCustomerToAdminRefundWaMessage,
@@ -67,6 +68,7 @@ interface CustomerDashboardProps {
     itemsSummary: string;
     pointsEarned: number;
     pointsRedeemedCost: number;
+    healthNote?: string;
   }) => void;
   onConfirmWizardBooking?: (draft: {
     total: number;
@@ -80,10 +82,17 @@ interface CustomerDashboardProps {
     markAsPaid: boolean;
     paymentProofImage?: string;
     paymentChannel?: string;
+    healthNote?: string;
     existingOrderId?: number | null;
     silentReceipt?: boolean;
   }) => BookingOrder | null;
   onRequestRefund?: (orderId: number, refundInfo: RefundRequestInfo) => void;
+  onRescheduleBooking?: (
+    orderId: number,
+    newDateIso: string,
+    newDatePretty: string,
+    newTimeSlot: string
+  ) => void;
   onRedeemPointReward?: (reward: PointReward) => void;
   onCopyText?: (text: string, label: string) => void;
   onViewReceipt: (order: BookingOrder) => void;
@@ -108,6 +117,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   onOpenPaymentModal,
   onConfirmWizardBooking,
   onRequestRefund,
+  onRescheduleBooking,
   onRedeemPointReward,
   onCopyText,
   onViewReceipt,
@@ -184,6 +194,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   );
   const [step3ProofImage, setStep3ProofImage] = useState<string>('');
   const [step3ProofError, setStep3ProofError] = useState<string>('');
+  const [step3HealthNote, setStep3HealthNote] = useState<string>('');
 
   const handleStep3ProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -212,6 +223,71 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [refundAccountHolder, setRefundAccountHolder] = useState<string>('');
   const [refundProofImage, setRefundProofImage] = useState<string>('');
   const [refundFormError, setRefundFormError] = useState<string>('');
+
+  // State Modal Reschedule Mandiri (Ganti Jadwal maksimal 4 jam sebelum jadwal awal)
+  const [rescheduleModalOrder, setRescheduleModalOrder] = useState<BookingOrder | null>(null);
+  const [rescheduleDateIso, setRescheduleDateIso] = useState<string>(() => getTodayIso());
+  const [rescheduleDatePretty, setRescheduleDatePretty] = useState<string>(() =>
+    formatDatePretty(new Date())
+  );
+  const [rescheduleTimeSlot, setRescheduleTimeSlot] = useState<string | null>(null);
+  const [rescheduleError, setRescheduleError] = useState<string>('');
+
+  const handleOpenRescheduleModal = (order: BookingOrder) => {
+    setRescheduleModalOrder(order);
+    setRescheduleDateIso(order.date);
+    setRescheduleDatePretty(order.datePretty);
+    setRescheduleTimeSlot(null);
+    setRescheduleError('');
+  };
+
+  const handleSubmitRescheduleForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rescheduleModalOrder || !onRescheduleBooking) return;
+
+    const eligibility = checkBookingRescheduleEligibility(
+      rescheduleModalOrder.date,
+      rescheduleModalOrder.time,
+      nowMs
+    );
+    if (!eligibility.canReschedule) {
+      setRescheduleError(
+        'Batas waktu ganti jadwal (maksimal 4 jam sebelum jadwal awal) sudah terlewati.'
+      );
+      return;
+    }
+
+    if (!rescheduleTimeSlot) {
+      setRescheduleError('Silakan pilih jam sesi baru yang tersedia terlebih dahulu.');
+      return;
+    }
+
+    if (
+      rescheduleDateIso === rescheduleModalOrder.date &&
+      rescheduleTimeSlot === rescheduleModalOrder.time
+    ) {
+      setRescheduleError('Silakan pilih tanggal atau jam yang berbeda dari jadwal awal Anda.');
+      return;
+    }
+
+    if (
+      isDatePast(rescheduleDateIso, nowMs) ||
+      isTimeSlotPast(rescheduleDateIso, rescheduleTimeSlot, nowMs)
+    ) {
+      setRescheduleError(
+        'Tanggal atau jam baru yang dipilih sudah terlewat. Silakan pilih jadwal lain.'
+      );
+      return;
+    }
+
+    onRescheduleBooking(
+      rescheduleModalOrder.id,
+      rescheduleDateIso,
+      rescheduleDatePretty,
+      rescheduleTimeSlot
+    );
+    setRescheduleModalOrder(null);
+  };
 
   const handleOpenRefundModal = (order: BookingOrder) => {
     setRefundModalOrder(order);
@@ -562,6 +638,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         pointsRedeemedCost: pricing.rewardObj.cost,
         payMethodType: step3MethodType,
         markAsPaid: false,
+        healthNote: step3HealthNote.trim() || undefined,
         existingOrderId: step3PendingOrderId,
         silentReceipt: true,
       });
@@ -635,6 +712,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         markAsPaid: true,
         paymentProofImage: requiresProof ? step3ProofImage : undefined,
         paymentChannel: resolvedChannel,
+        healthNote: step3HealthNote.trim() || undefined,
         existingOrderId: step3PendingOrderId,
         silentReceipt: false,
       });
@@ -649,6 +727,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         setStep3PendingOrderId(null);
         setStep3ProofImage('');
         setStep3ProofError('');
+        setStep3HealthNote('');
       }
     } else {
       onOpenPaymentModal({
@@ -659,6 +738,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         itemsSummary: finalItemsSummary,
         pointsEarned: pricing.pts,
         pointsRedeemedCost: pricing.rewardObj.cost,
+        healthNote: step3HealthNote.trim() || undefined,
       });
     }
   };
@@ -1894,6 +1974,33 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     })}
                   </select>
                 </div>
+
+                {/* Form Catatan Keluhan Fisik (Health / Treatment Note) Saat Booking */}
+                <div className="bg-black/30 p-3.5 rounded-2xl border border-[#D4AF37]/40 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      htmlFor="step3HealthNoteInput"
+                      className="text-xs font-black text-[#D4AF37] flex items-center gap-1.5"
+                    >
+                      <i className="fa-solid fa-notes-medical"></i>
+                      <span>Catatan Keluhan / Fokus Pijat</span>
+                    </label>
+                    <span className="text-[10px] font-bold bg-white/10 text-emerald-200 px-2 py-0.5 rounded">
+                      Opsional
+                    </span>
+                  </div>
+                  <textarea
+                    id="step3HealthNoteInput"
+                    rows={2}
+                    value={step3HealthNote}
+                    onChange={(e) => setStep3HealthNote(e.target.value)}
+                    placeholder="Catatan Keluhan / Fokus Pijat (Contoh: Nyeri bahu kanan, cedera engkel ringan, hindari area pinggang)"
+                    className="w-full p-2.5 rounded-xl bg-white/95 border border-[#D4AF37]/60 text-stone-900 text-xs font-medium focus:outline-none focus:border-[#D4AF37]"
+                  />
+                  <p className="text-[10px] text-emerald-200/85 leading-snug">
+                    Catatan ini akan disimpan ke dalam data booking dan tampil pada Struk Digital serta Dashboard Admin / Terapis.
+                  </p>
+                </div>
               </div>
 
               {/* 2. Pilihan Metode Pembayaran Dinamis (QRIS / Transfer Bank / Cash) */}
@@ -2560,10 +2667,26 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           <i className="fa-regular fa-calendar mr-1.5"></i>
                           {b.datePretty} • Jam <b>{b.time} WIB</b>
                         </p>
+                        {b.previousSchedule && (
+                          <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg inline-flex items-center gap-1">
+                            <i className="fa-solid fa-calendar-check text-[10px]"></i>
+                            <span>
+                              Reschedule dari: <s className="text-stone-400">{b.previousSchedule}</s>
+                            </span>
+                          </p>
+                        )}
                         <p className="text-xs text-emerald-900 font-bold">
                           Metode: {b.payMethod}
                           {b.vaNumber && !b.payMethod.includes('QRIS') ? ` (${b.vaNumber})` : ''}
                         </p>
+                        {b.healthNote && (
+                          <div className="bg-amber-50/80 border border-amber-200 rounded-xl px-2.5 py-1.5 text-[11px] text-stone-800 mt-1">
+                            <span className="font-black text-[#0B261C] block text-[10px]">
+                              🩺 Catatan Keluhan / Fokus Pijat:
+                            </span>
+                            <span className="font-semibold leading-snug">{b.healthNote}</span>
+                          </div>
+                        )}
                       </div>
                       <span className="font-black text-sm text-[#0B261C] whitespace-nowrap">
                         {formatRupiah(b.total)}
@@ -2760,6 +2883,59 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           </button>
                         )}
                       </div>
+
+                      {/* Tombol Reschedule Mandiri (Hanya untuk Booking Confirmed / Lunas, Maks. 4 Jam Sebelum Jadwal Awal) */}
+                      {isPaid && isActiveBooking && (() => {
+                        const rescheduleEligibility = checkBookingRescheduleEligibility(
+                          b.date,
+                          b.time,
+                          nowMs
+                        );
+                        return (
+                          <div className="space-y-1.5 pt-1">
+                            <button
+                              type="button"
+                              disabled={!rescheduleEligibility.canReschedule}
+                              onClick={() => {
+                                if (rescheduleEligibility.canReschedule) {
+                                  handleOpenRescheduleModal(b);
+                                }
+                              }}
+                              className={`tactile-btn w-full min-h-[42px] font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 border transition ${
+                                rescheduleEligibility.canReschedule
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-[#0B261C] border-[#D4AF37] shadow-xs'
+                                  : 'bg-stone-100 text-stone-400 border-stone-300 cursor-not-allowed opacity-80'
+                              }`}
+                            >
+                              <i
+                                className={`fa-solid ${
+                                  rescheduleEligibility.canReschedule
+                                    ? 'fa-calendar-days text-amber-700'
+                                    : 'fa-lock'
+                                }`}
+                              ></i>
+                              <span>Ajukan Ganti Jadwal (Reschedule)</span>
+                            </button>
+                            <p className="text-[10px] text-stone-500 flex items-center justify-between px-1">
+                              <span>
+                                <i className="fa-regular fa-calendar-check mr-1 text-amber-700"></i>
+                                Batas reschedule mandiri: maks. 4 jam sebelum jadwal awal
+                              </span>
+                              <span
+                                className={`font-bold ${
+                                  rescheduleEligibility.canReschedule
+                                    ? 'text-emerald-800'
+                                    : 'text-red-600'
+                                }`}
+                              >
+                                {rescheduleEligibility.canReschedule
+                                  ? `Bisa ganti jadwal (${rescheduleEligibility.remainingLabel})`
+                                  : 'Lewat batas 4 jam'}
+                              </span>
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                       {/* Keterangan Batas Waktu 1 Jam Sebelum Jadwal SPA Dimulai */}
                       {isActiveBooking && !refundEligibility.canRefund && (
@@ -3069,6 +3245,223 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 >
                   <i className="fa-solid fa-paper-plane"></i>
                   <span>Kirim Pengajuan Refund ke Admin</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL RESCHEDULE MANDIRI (GANTI TANGGAL & JAM TANPA BAYAR ULANG)  */}
+      {/* ================================================================= */}
+      {rescheduleModalOrder && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rescheduleModalTitle"
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade overflow-y-auto"
+        >
+          <div className="bg-[#F9F6F0] w-full max-w-sm rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white p-4 border-b border-[#D4AF37]/60 flex justify-between items-center">
+              <div>
+                <span className="text-[9px] font-black uppercase tracking-widest bg-amber-400/20 text-[#D4AF37] px-2 py-0.5 rounded border border-[#D4AF37]/40">
+                  Reschedule Mandiri • Tanpa Biaya Tambahan
+                </span>
+                <h3 id="rescheduleModalTitle" className="text-sm font-black text-white mt-1">
+                  Ajukan Ganti Jadwal (Reschedule)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRescheduleModalOrder(null)}
+                aria-label="Tutup Modal Reschedule"
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-xs font-black"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSubmitRescheduleForm}
+              className="p-4 space-y-3.5 overflow-y-auto flex-1 text-xs"
+            >
+              {/* Info Pesanan Saat Ini */}
+              <div className="bg-white p-3 rounded-2xl border border-stone-200/90 shadow-xs space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-stone-400 uppercase">
+                    Kode Booking #GA-{String(rescheduleModalOrder.id).slice(-6)}
+                  </span>
+                  <span className="text-[10px] font-black bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">
+                    Layanan & Pembayaran Tetap
+                  </span>
+                </div>
+                <p className="font-black text-[#0B261C] text-xs leading-snug">
+                  {rescheduleModalOrder.items}
+                </p>
+                <p className="text-[11px] text-stone-600">
+                  Jadwal Awal: <b>{rescheduleModalOrder.datePretty} • Jam {rescheduleModalOrder.time} WIB</b>
+                </p>
+              </div>
+
+              {/* 1. Pilih Tanggal Baru */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-black text-[#0B261C] block">
+                  1. Pilih Tanggal Baru:
+                </span>
+                <div className="flex gap-2 overflow-x-auto pb-1.5">
+                  {calendarDays
+                    .filter((d) => !d.isPast)
+                    .map((d) => {
+                      const isSelected = rescheduleDateIso === d.iso;
+                      return (
+                        <button
+                          key={d.iso}
+                          type="button"
+                          disabled={d.isHoliday}
+                          onClick={() => {
+                            if (d.isHoliday) return;
+                            setRescheduleDateIso(d.iso);
+                            setRescheduleDatePretty(d.pretty);
+                            setRescheduleTimeSlot(null);
+                            setRescheduleError('');
+                          }}
+                          className={`tactile-btn min-w-[66px] p-2 rounded-2xl border-2 flex flex-col items-center justify-center transition flex-shrink-0 ${
+                            d.isHoliday
+                              ? 'bg-red-50 text-red-400 border-red-200 cursor-not-allowed opacity-70'
+                              : isSelected
+                              ? 'bg-[#0B261C] text-white border-[#D4AF37] shadow-xs'
+                              : 'bg-white text-stone-800 border-stone-200 hover:border-emerald-700'
+                          }`}
+                        >
+                          <span
+                            className={`text-[10px] font-bold ${
+                              isSelected ? 'text-[#D4AF37]' : 'text-stone-500'
+                            }`}
+                          >
+                            {d.dayName}
+                          </span>
+                          <span className="text-sm font-black leading-tight mt-0.5">
+                            {d.dayNum}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold ${
+                              isSelected ? 'text-emerald-200' : 'text-stone-500'
+                            }`}
+                          >
+                            {d.isHoliday ? 'Libur' : d.monthName}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* 2. Pilih Jam Sesi Baru */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-black text-[#0B261C] block">
+                  2. Pilih Jam Sesi Baru ({rescheduleDatePretty}):
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {masterTimeSlots.map((slot) => {
+                    const isCurrentBookingSlot =
+                      rescheduleDateIso === rescheduleModalOrder.date &&
+                      slot.time === rescheduleModalOrder.time;
+                    const otherBookings = bookings.filter(
+                      (b) => b.id !== rescheduleModalOrder.id
+                    );
+                    const status = isSlotAvailable(
+                      slot.time,
+                      rescheduleDateIso,
+                      masterTimeSlots,
+                      otherBookings,
+                      nowMs
+                    );
+                    const isSelected = rescheduleTimeSlot === slot.time;
+
+                    if (isCurrentBookingSlot) {
+                      return (
+                        <button
+                          key={slot.time}
+                          type="button"
+                          disabled
+                          className="py-2.5 px-2 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 cursor-not-allowed flex flex-col items-center justify-center"
+                        >
+                          <span className="text-xs font-black">{slot.time}</span>
+                          <span className="text-[9px] font-bold">Jadwal Awal</span>
+                        </button>
+                      );
+                    }
+
+                    if (!status.available) {
+                      return (
+                        <button
+                          key={slot.time}
+                          type="button"
+                          disabled
+                          className="py-2.5 px-2 rounded-xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center"
+                        >
+                          <span className="text-xs font-bold line-through">{slot.time}</span>
+                          <span className="text-[9px] font-bold">
+                            {status.reason === 'booked'
+                              ? 'Penuh'
+                              : status.reason === 'closed'
+                              ? 'Tutup'
+                              : 'Lewat'}
+                          </span>
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        onClick={() => {
+                          setRescheduleTimeSlot(slot.time);
+                          setRescheduleError('');
+                        }}
+                        className={`tactile-btn py-2.5 px-2 rounded-xl border-2 flex flex-col items-center justify-center transition ${
+                          isSelected
+                            ? 'bg-[#0B261C] text-white border-[#D4AF37] shadow-xs'
+                            : 'bg-white text-[#0B261C] border-emerald-700/40 hover:border-emerald-800'
+                        }`}
+                      >
+                        <span className="text-xs font-black">{slot.time}</span>
+                        <span
+                          className={`text-[9px] font-extrabold ${
+                            isSelected ? 'text-[#D4AF37]' : 'text-emerald-700'
+                          }`}
+                        >
+                          {isSelected ? '✓ Dipilih' : 'Tersedia'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {rescheduleError && (
+                <div className="bg-red-50 border border-red-300 text-red-800 p-2.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-triangle-exclamation text-red-600"></i>
+                  <span>{rescheduleError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setRescheduleModalOrder(null)}
+                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-3 px-4 rounded-2xl text-xs"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-2xl text-xs shadow-md border border-amber-300 flex items-center justify-center gap-1.5"
+                >
+                  <i className="fa-solid fa-calendar-check"></i>
+                  <span>Simpan Jadwal Baru</span>
                 </button>
               </div>
             </form>

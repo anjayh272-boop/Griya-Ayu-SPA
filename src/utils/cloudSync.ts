@@ -89,6 +89,11 @@ function sanitizeBookingPayload(order: BookingOrder): BookingOrder & { updatedAt
     total: Math.max(0, Math.min(100_000_000, Number(order.total) || 0)),
     paymentStatus: (order.paymentStatus || 'Pending').slice(0, 60) as BookingOrder['paymentStatus'],
     status: (order.status || 'Pending_Payment').slice(0, 40) as BookingOrder['status'],
+    healthNote: order.healthNote ? String(order.healthNote).trim().slice(0, 1000) : undefined,
+    rescheduledAt: order.rescheduledAt ? String(order.rescheduledAt).slice(0, 80) : undefined,
+    previousSchedule: order.previousSchedule
+      ? String(order.previousSchedule).slice(0, 120)
+      : undefined,
     paymentProofImage: safeProof,
     refundRequest: safeRefund,
     updatedAt: Date.now(),
