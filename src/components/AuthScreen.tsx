@@ -100,15 +100,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsSendingOtp(true);
 
     try {
-      // 3. Panggil Vercel Rewrites Proxy /api/vps/send-message agar tidak terkena Mixed Content Block / CORS
-      const response = await fetch('/api/vps/send-message', {
+      // 3. Panggil endpoint HTTPS Cloudflare Tunnel WhatsApp Gateway
+      const response = await fetch('https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           target: nomorWhatsApp,
-          message: `Halo! Kode OTP Griya Ayu Anda adalah: ${otpCode}. Berlaku 5 menit. Jangan bagikan kode ini kepada siapa pun.`,
+          message: `Halo! Kode OTP Griya Ayu Anda adalah: ${otpCode}. Jangan berikan kode ini kepada siapa pun.`,
         }),
       });
 

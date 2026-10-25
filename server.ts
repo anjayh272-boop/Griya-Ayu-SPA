@@ -6,7 +6,7 @@ import { createServer as createViteServer } from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VPS_WA_GATEWAY_URL = 'http://104.234.26.109:2219/api/send-message';
+const VPS_WA_GATEWAY_URL = 'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message';
 const FONNTE_FALLBACK_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
 
 async function startServer() {
