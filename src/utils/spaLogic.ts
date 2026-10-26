@@ -247,6 +247,8 @@ export function isVerifiedRevenueOrder(order: BookingOrder): boolean {
     order.status === 'Refund_Completed' ||
     order.paymentStatus === 'Refund Selesai / Dibatalkan' ||
     order.paymentStatus === 'Menunggu Cek Refund Admin' ||
+    order.paymentStatus === 'Dibatalkan' ||
+    order.paymentStatus === 'Dibatalkan (Waktu Habis / Kedaluwarsa)' ||
     order.paymentStatus === 'Gagal' ||
     order.paymentStatus === 'Kedaluwarsa' ||
     order.paymentStatus === 'Pending'
@@ -582,18 +584,27 @@ export function isSlotAvailable(
     return { available: false, reason: 'closed' };
   }
 
-  const isBooked = bookings.some(
-    (b) =>
-      b.date === dateIso &&
-      b.time === time &&
-      isOrderLockedStatus(b) &&
-      b.status !== 'Cancelled' &&
-      b.status !== 'Refund_Requested' &&
-      b.status !== 'Refund_Completed' &&
-      b.paymentStatus !== 'Menunggu Cek Refund Admin' &&
-      b.paymentStatus !== 'Refund Selesai / Dibatalkan' &&
-      b.status !== 'Pending_Payment'
-  );
+  const isBooked = bookings.some((b) => {
+    if (b.date !== dateIso || b.time !== time) return false;
+    if (
+      b.status === 'Cancelled' ||
+      b.status === 'Refund_Requested' ||
+      b.status === 'Refund_Completed' ||
+      b.paymentStatus === 'Menunggu Cek Refund Admin' ||
+      b.paymentStatus === 'Refund Selesai / Dibatalkan' ||
+      b.paymentStatus === 'Dibatalkan' ||
+      b.paymentStatus === 'Dibatalkan (Waktu Habis / Kedaluwarsa)' ||
+      b.paymentStatus === 'Gagal' ||
+      b.paymentStatus === 'Kedaluwarsa'
+    ) {
+      return false;
+    }
+    const isActivePending =
+      b.status === 'Pending_Payment' &&
+      b.paymentStatus === 'Pending' &&
+      b.expiresAt > nowMs;
+    return isOrderLockedStatus(b) || isActivePending;
+  });
 
   if (isBooked) {
     return { available: false, reason: 'booked' };
@@ -1091,6 +1102,33 @@ export async function sendOtpWhatsApp(
 
 export const sendFonnteOtpWhatsApp = sendOtpWhatsApp;
 
+/**
+ * Mengirim kata sandi baru hasil reset Admin ke WhatsApp pelanggan via WA Gateway.
+ */
+export async function sendPasswordResetWhatsApp(
+  customerName: string,
+  customerPhone: string,
+  newPassword: string
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const cleanTarget = normalizePhoneDigits(customerPhone) || customerPhone;
+  const message = `Halo Kak ${customerName} 🌿\n\nKata sandi akun Griya Ayu Sport Massage & SPA Anda telah berhasil direset oleh Admin.\n\nKata sandi baru Anda: *${newPassword}*\n\nSilakan gunakan kata sandi ini untuk masuk ke website/aplikasi di https://griyaayu.vercel.app dan segera ganti kata sandi Anda demi keamanan akun. Terima kasih! 🙏✨`;
+  return sendWhatsAppViaVpsGateway(cleanTarget, message);
+}
+
+/**
+ * Generate kata sandi acak alfanumerik 6-8 karakter yang mudah dibaca (tanpa karakter ambigu 0/O/1/I/l).
+ */
+export function generateReadableRandomPassword(length: number = 7): string {
+  const safeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const targetLen = Math.max(6, Math.min(8, length));
+  let result = '';
+  for (let i = 0; i < targetLen; i += 1) {
+    const idx = Math.floor(Math.random() * safeChars.length);
+    result += safeChars[idx];
+  }
+  return result;
+}
+
 const sentBookingConfirmationIds = new Set<number>();
 
 /**
@@ -1454,21 +1492,54 @@ export function markBookingIdAsDeleted(orderId: number): number[] {
 }
 
 /**
+ * Menyaring dan mendeduplikasi daftar akun pelanggan agar:
+ * - Tidak ada duplikasi nomor WhatsApp
+ * - Hanya menghitung member valid (role 'customer' / 'member' atau non-admin)
+ * - Status member tetap 'active'
+ */
+export function getValidMemberCustomers(users: User[]): User[] {
+  if (!Array.isArray(users)) return [];
+  const mapByPhone = new Map<string, User>();
+  users.forEach((u) => {
+    if (!u || !u.phone) return;
+    const normPhone = normalizePhoneDigits(u.phone);
+    if (!normPhone || normPhone.length < 5) return;
+    if (
+      u.role === 'admin' ||
+      normPhone === '087765573476' ||
+      normPhone === '081585921993'
+    ) {
+      return;
+    }
+    const existing = mapByPhone.get(normPhone);
+    mapByPhone.set(normPhone, {
+      ...(existing || {}),
+      ...u,
+      id: u.id || existing?.id || normPhone,
+      phone: normPhone,
+      role: u.role === 'member' || u.role === 'customer' ? u.role : 'customer',
+      status: u.status || 'active',
+    });
+  });
+  return Array.from(mapByPhone.values());
+}
+
+/**
  * Memuat daftar akun pelanggan dari localStorage tanpa pernah mereset data yang sudah ada.
  */
 export function loadCustomersPersistently(fallback: User[] = []): User[] {
   const live = safeLoadJson<User[] | null>(STORAGE_KEYS.CUSTOMERS, null);
   if (Array.isArray(live)) {
-    return live;
+    return getValidMemberCustomers(live);
   }
-  return fallback;
+  return getValidMemberCustomers(fallback);
 }
 
 /**
- * Menyimpan daftar akun pelanggan ke localStorage.
+ * Menyimpan daftar akun pelanggan ke localStorage (terdeduplikasi & menjaga integritas member).
  */
 export function saveCustomersPersistently(customers: User[]): void {
-  safeSaveJson(STORAGE_KEYS.CUSTOMERS, customers);
+  safeSaveJson(STORAGE_KEYS.CUSTOMERS, getValidMemberCustomers(customers));
 }
 
 /**

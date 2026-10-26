@@ -56,6 +56,7 @@ import {
   sendRescheduleBookingWhatsApp,
   checkBookingRescheduleEligibility,
   normalizeHomeServiceSchedule,
+  getValidMemberCustomers,
 } from './utils/spaLogic.ts';
 import {
   subscribeToGlobalCloudState,
@@ -344,13 +345,15 @@ export default function App() {
             });
           }
 
-          const merged = Array.from(mapByPhone.values());
+          const merged = getValidMemberCustomers(Array.from(mapByPhone.values()));
           saveCustomersPersistently(merged);
 
           // Perbarui currentUser jika pelanggan sedang login (misal poin bertambah / sandi berubah)
           setCurrentUser((curr) => {
             if (!curr || curr.role === 'admin') return curr;
-            const updatedSelf = mapByPhone.get(normalizePhoneDigits(curr.phone));
+            const updatedSelf = merged.find(
+              (m) => normalizePhoneDigits(m.phone) === normalizePhoneDigits(curr.phone)
+            );
             if (
               updatedSelf &&
               (updatedSelf.points !== curr.points ||
@@ -802,15 +805,29 @@ export default function App() {
   const handleUpdateCustomerAccount = (updatedCustomer: User) => {
     void syncCustomerToCloud(updatedCustomer);
     setCustomers((prev) => {
+      const targetPhone = normalizePhoneDigits(updatedCustomer.phone);
       const idx = prev.findIndex(
-        (u) => normalizePhoneDigits(u.phone) === normalizePhoneDigits(updatedCustomer.phone)
+        (u) => normalizePhoneDigits(u.phone) === targetPhone
       );
-      const next =
+      const next: User[] =
         idx !== -1
-          ? prev.map((u, i) => (i === idx ? updatedCustomer : u))
-          : [...prev, updatedCustomer];
-      saveCustomersPersistently(next);
-      return next;
+          ? prev.map((u, i): User =>
+              i === idx
+                ? {
+                    ...u,
+                    ...updatedCustomer,
+                    id: u.id || updatedCustomer.id || targetPhone,
+                    phone: u.phone,
+                    points: updatedCustomer.points ?? u.points,
+                    role: u.role === 'admin' ? 'admin' : u.role || 'customer',
+                    status: u.status || 'active',
+                  }
+                : u
+            )
+          : prev;
+      const sanitized = getValidMemberCustomers(next);
+      saveCustomersPersistently(sanitized);
+      return sanitized;
     });
   };
 
@@ -878,25 +895,32 @@ export default function App() {
     setPaymentModalOpen(true);
   };
 
-  // Otomatis ubah status booking Pending menjadi Gagal apabila batas waktu 20 menit telah berakhir
+  // Otomatis ubah status booking Pending menjadi "Dibatalkan (Waktu Habis / Kedaluwarsa)" apabila batas waktu hitung mundur (00:00) telah berakhir
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       setBookings((prev) => {
         const hasExpiredPending = prev.some(
-          (b) => b.paymentStatus === 'Pending' && b.expiresAt <= now
+          (b) =>
+            (b.paymentStatus === 'Pending' || b.status === 'Pending_Payment') &&
+            b.status !== 'Cancelled' &&
+            b.expiresAt <= now
         );
         if (!hasExpiredPending) return prev;
 
         const next = prev.map((b) => {
-          if (b.paymentStatus === 'Pending' && b.expiresAt <= now) {
-            const failedOrder: BookingOrder = {
+          if (
+            (b.paymentStatus === 'Pending' || b.status === 'Pending_Payment') &&
+            b.status !== 'Cancelled' &&
+            b.expiresAt <= now
+          ) {
+            const expiredOrder: BookingOrder = {
               ...b,
-              paymentStatus: 'Gagal',
+              paymentStatus: 'Dibatalkan (Waktu Habis / Kedaluwarsa)',
               status: 'Cancelled',
             };
-            void syncBookingToCloud(failedOrder);
-            return failedOrder;
+            void syncBookingToCloud(expiredOrder);
+            return expiredOrder;
           }
           return b;
         });
@@ -1480,6 +1504,48 @@ export default function App() {
     showToast(
       'Treatment Selesai & Poin Dikirim! 🎉',
       `Sesi terapi ${targetOrder.customer} selesai. +${targetOrder.ptsEarned} Poin telah ditambahkan ke akun pelanggan.`
+    );
+  };
+
+  // Pembatalan Instan (1-Klik) untuk Pesanan Berstatus "Pending Pembayaran" (Belum Bayar -> Tanpa Form Rekening/Bukti Transfer)
+  const handleCancelPendingBooking = (orderId: number) => {
+    const targetOrder = bookings.find((b) => b.id === orderId);
+    if (!targetOrder) return;
+
+    const cancelledPendingOrder: BookingOrder = {
+      ...targetOrder,
+      paymentStatus: 'Dibatalkan',
+      status: 'Cancelled',
+      expiresAt: Date.now(),
+      ptsEarned: 0,
+      refundRejectedReason: undefined,
+    };
+
+    updateBookingsAndPersist((prev) =>
+      prev.map((b) => (b.id === orderId ? cancelledPendingOrder : b))
+    );
+
+    if (activePaymentOrderId === orderId) {
+      setPaymentModalOpen(false);
+      setActivePaymentOrderId(null);
+    }
+
+    const customerNotif: AppNotification = {
+      id: Date.now() + 1,
+      target: 'customer',
+      targetPhone: cancelledPendingOrder.wa,
+      type: 'refund_approved',
+      title: `🔓 Pesanan Pending Dibatalkan — Jam ${cancelledPendingOrder.time} WIB Dilepaskan`,
+      message: `Pesanan #GA-${String(cancelledPendingOrder.id).slice(-6)} (${cancelledPendingOrder.datePretty} • Jam ${cancelledPendingOrder.time} WIB) telah berhasil dibatalkan dan slot jadwal kembali tersedia.`,
+      createdAt: nowFormatted(),
+      read: false,
+      orderId: cancelledPendingOrder.id,
+    };
+
+    addNotificationsAndSync([customerNotif]);
+    showToast(
+      'Pesanan berhasil dibatalkan.',
+      `Pesanan #GA-${String(cancelledPendingOrder.id).slice(-6)} (${cancelledPendingOrder.datePretty} • Jam ${cancelledPendingOrder.time} WIB) telah dibatalkan secara instan dan slot jadwal yang Anda pilih telah dilepaskan kembali.`
     );
   };
 
@@ -2151,6 +2217,7 @@ export default function App() {
             onUpdateUser={handleUpdateUser}
             onOpenPaymentModal={handleOpenPaymentModal}
             onConfirmWizardBooking={handleConfirmWizardBooking}
+            onCancelPendingBooking={handleCancelPendingBooking}
             onRequestRefund={handleRequestRefund}
             onRescheduleBooking={handleRescheduleBooking}
             onRedeemPointReward={handleRedeemPointReward}

@@ -1,18 +1,23 @@
 import React, { useState } from 'react';
 import { User, BookingOrder, Language } from '../types/index.ts';
+import { INITIAL_USERS } from '../data/mockData.ts';
 import {
   formatRupiah,
   isVerifiedRevenueOrder,
   compressImageFileToDataUrl,
   loadCustomersPersistently,
   saveCustomersPersistently,
+  normalizePhoneDigits,
+  getValidMemberCustomers,
+  generateReadableRandomPassword,
+  sendPasswordResetWhatsApp,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
   sendOtpWhatsApp,
 } from '../utils/spaLogic.ts';
-import { syncCustomerToCloud } from '../utils/cloudSync.ts';
+import { updateCustomerPasswordInCloud } from '../utils/cloudSync.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
 interface AccountPanelProps {
@@ -72,9 +77,14 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   const [otpSending, setOtpSending] = useState(false);
   const [otpStatusMessage, setOtpStatusMessage] = useState('');
 
-  // Admin: Reset Customer Password State
-  const [selectedCustomerPhone, setSelectedCustomerPhone] = useState('');
-  const [adminResetNewPass, setAdminResetNewPass] = useState('');
+  // Admin: Reset Customer Password Modal & Member Management State
+  const [memberSearchQuery, setMemberSearchQuery] = useState('');
+  const [resetTargetCustomer, setResetTargetCustomer] = useState<User | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [sendWaOnReset, setSendWaOnReset] = useState(true);
+  const [isSubmittingReset, setIsSubmittingReset] = useState(false);
+  const [resetFormError, setResetFormError] = useState('');
 
   // Handle Photo File Upload (DataURL terkompresi agar aman di localStorage)
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -233,42 +243,120 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
     setActiveSection('menu');
   };
 
-  // Admin helper to reset a customer's password (synced globally to Cloud)
-  const handleAdminResetCustomerPass = async (e: React.FormEvent) => {
+  const storedCustomers: User[] = React.useMemo(() => {
+    const rawList =
+      customers && customers.length > 0
+        ? customers
+        : loadCustomersPersistently(INITIAL_USERS);
+    return getValidMemberCustomers(rawList);
+  }, [customers, activeSection]);
+
+  const filteredMemberCustomers: User[] = React.useMemo(() => {
+    const q = memberSearchQuery.trim().toLowerCase();
+    if (!q) return storedCustomers;
+    return storedCustomers.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        normalizePhoneDigits(c.phone).includes(q)
+    );
+  }, [storedCustomers, memberSearchQuery]);
+
+  const handleOpenResetPasswordModal = (member: User) => {
+    setResetTargetCustomer(member);
+    setResetNewPassword('');
+    setShowResetPassword(false);
+    setSendWaOnReset(true);
+    setResetFormError('');
+  };
+
+  const handleGenerateRandomPassword = () => {
+    const randomPass = generateReadableRandomPassword(7);
+    setResetNewPassword(randomPass);
+    setShowResetPassword(true);
+    setResetFormError('');
+  };
+
+  const handleConfirmResetCustomerPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCustomerPhone || adminResetNewPass.trim().length < 6) {
-      onShowToast(
-        'Data Belum Lengkap',
-        'Pilih pelanggan dan masukkan kata sandi baru minimal 6 karakter.'
-      );
+    if (!resetTargetCustomer || isSubmittingReset) return;
+
+    const cleanNewPass = resetNewPassword.trim();
+    if (cleanNewPass.length < 6) {
+      setResetFormError('Kata sandi baru minimal harus 6 karakter.');
       return;
     }
-    const baseList =
-      customers && customers.length > 0 ? [...customers] : loadCustomersPersistently([]);
-    const idx = baseList.findIndex((u) => u.phone === selectedCustomerPhone);
-    if (idx !== -1) {
+
+    setIsSubmittingReset(true);
+    setResetFormError('');
+
+    try {
+      const targetNormPhone = normalizePhoneDigits(resetTargetCustomer.phone);
+      const baseList = [...storedCustomers];
+      const targetIdx = baseList.findIndex(
+        (u) => normalizePhoneDigits(u.phone) === targetNormPhone
+      );
+
+      if (targetIdx === -1) {
+        setResetFormError('Data member tidak ditemukan.');
+        setIsSubmittingReset(false);
+        return;
+      }
+
+      const existingMember = baseList[targetIdx];
+      // UPDATE HANYA pada field kata sandi (pass) milik pelanggan yang bersangkutan
+      // Tanpa membuat record baru dan tanpa mengubah ID, nomor WA, poin, maupun status member
       const updatedCustomer: User = {
-        ...baseList[idx],
-        pass: adminResetNewPass.trim(),
+        ...existingMember,
+        id: existingMember.id || targetNormPhone,
+        name: existingMember.name,
+        phone: existingMember.phone,
+        points: existingMember.points,
+        role: existingMember.role === 'admin' ? 'admin' : existingMember.role || 'customer',
+        status: existingMember.status || 'active',
+        avatar: existingMember.avatar,
+        pass: cleanNewPass,
       };
-      baseList[idx] = updatedCustomer;
+
+      baseList[targetIdx] = updatedCustomer;
       saveCustomersPersistently(baseList);
-      await syncCustomerToCloud(updatedCustomer);
+      await updateCustomerPasswordInCloud(existingMember, cleanNewPass);
+
       if (onUpdateCustomerAccount) {
         onUpdateCustomerAccount(updatedCustomer);
       }
+
+      let waGatewayInfo = '';
+      if (sendWaOnReset) {
+        const waRes = await sendPasswordResetWhatsApp(
+          updatedCustomer.name,
+          updatedCustomer.phone,
+          cleanNewPass
+        );
+        waGatewayInfo = waRes.ok
+          ? ` Kata sandi baru juga telah dikirim otomatis ke WhatsApp ${updatedCustomer.phone} via WA Gateway.`
+          : ` (Catatan: Pengiriman otomatis WA Gateway belum terhubung, Anda juga dapat mengirimkannya via tombol WhatsApp).`;
+      }
+
+      const rawDigits = updatedCustomer.phone.replace(/[^0-9]/g, '');
+      const waTarget = rawDigits.startsWith('0') ? '62' + rawDigits.slice(1) : rawDigits;
+      const waFallbackText = `Halo Kak ${updatedCustomer.name} 🌿\n\nKata sandi akun Griya Ayu Sport Massage & SPA Anda telah berhasil direset oleh Admin.\n\nKata sandi baru Anda: *${cleanNewPass}*\n\nSilakan gunakan kata sandi ini untuk masuk ke website/aplikasi di https://griyaayu.vercel.app dan segera ganti kata sandi Anda demi keamanan akun. Terima kasih! 🙏✨`;
+      const waFallbackUrl = `https://wa.me/${waTarget}?text=${encodeURIComponent(waFallbackText)}`;
+
+      const updatedName = updatedCustomer.name;
+      setResetTargetCustomer(null);
+      setResetNewPassword('');
+      setShowResetPassword(false);
+
       onShowToast(
-        'Sandi Pelanggan Direset! ✅',
-        `Kata sandi untuk member ${updatedCustomer.name} (${updatedCustomer.phone}) berhasil diubah menjadi: ${adminResetNewPass.trim()}`
+        `Kata sandi untuk ${updatedName} berhasil diperbarui!`,
+        `Akun member ${updatedName} (${updatedCustomer.phone}) tetap aktif dengan ${updatedCustomer.points} Poin Loyalitas.${waGatewayInfo}`,
+        waFallbackUrl
       );
-      setAdminResetNewPass('');
+    } finally {
+      setIsSubmittingReset(false);
     }
   };
-
-  const storedCustomers: User[] = React.useMemo(() => {
-    if (customers && customers.length > 0) return customers;
-    return loadCustomersPersistently([]);
-  }, [customers, activeSection]);
 
   const userTransactions = isAdmin
     ? bookings
@@ -424,6 +512,140 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           <i className="fa-solid fa-arrow-left"></i>
           <span>{isEn ? 'Back to Account Menu' : 'Kembali ke Menu Akun'}</span>
         </button>
+      )}
+
+      {/* ================================================================= */}
+      {/* MANAJEMEN PELANGGAN / DATA MEMBER (KHUSUS ADMIN)                  */}
+      {/* ================================================================= */}
+      {isAdmin && activeSection === 'menu' && (
+        <section
+          aria-label="Manajemen Pelanggan dan Data Member"
+          className="bg-white rounded-2xl border-2 border-[#D4AF37]/80 shadow-sm overflow-hidden animate-page-enter"
+        >
+          {/* Header Manajemen Pelanggan */}
+          <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white px-4 py-3 border-b border-[#D4AF37]/50 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] flex items-center justify-center flex-shrink-0">
+                <i className="fa-solid fa-users-gear text-xs"></i>
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-xs sm:text-sm font-black text-[#D4AF37] leading-tight">
+                  Manajemen Pelanggan / Data Member
+                </h3>
+                <p className="text-[10px] text-emerald-200 leading-tight mt-0.5">
+                  Kelola akun member aktif &amp; reset kata sandi pelanggan
+                </p>
+              </div>
+            </div>
+
+            <span className="bg-[#D4AF37] text-[#0B261C] text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs whitespace-nowrap flex items-center gap-1">
+              <i className="fa-solid fa-user-check"></i>
+              <span>Total Member: {storedCustomers.length} Akun</span>
+            </span>
+          </div>
+
+          <div className="p-3.5 space-y-3">
+            {/* Pencarian Member */}
+            <div className="relative">
+              <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
+              <input
+                type="text"
+                value={memberSearchQuery}
+                onChange={(e) => setMemberSearchQuery(e.target.value)}
+                placeholder="Cari nama pelanggan atau nomor WhatsApp..."
+                className="w-full pl-8 pr-8 py-2 rounded-xl bg-stone-50 border border-stone-200 focus:border-[#0B261C] text-xs font-bold text-stone-800 focus:outline-none"
+              />
+              {memberSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setMemberSearchQuery('')}
+                  aria-label="Bersihkan pencarian member"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 text-xs px-1"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Daftar Baris Akun Pelanggan */}
+            {filteredMemberCustomers.length === 0 ? (
+              <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 text-center text-xs text-stone-500 font-bold">
+                Tidak ada data member yang cocok dengan pencarian &ldquo;{memberSearchQuery}&rdquo;.
+              </div>
+            ) : (
+              <div className="divide-y divide-stone-200/80 border border-stone-200 rounded-xl overflow-hidden bg-stone-50/50 max-h-80 overflow-y-auto">
+                {filteredMemberCustomers.map((member) => {
+                  const memberInitials = member.name
+                    .split(' ')
+                    .map((w) => w[0])
+                    .join('')
+                    .slice(0, 2)
+                    .toUpperCase();
+                  const memberOrdersCount = bookings.filter(
+                    (b) =>
+                      normalizePhoneDigits(b.wa) === normalizePhoneDigits(member.phone) &&
+                      b.status !== 'Cancelled'
+                  ).length;
+
+                  return (
+                    <div
+                      key={normalizePhoneDigits(member.phone)}
+                      className="p-3 bg-white hover:bg-emerald-50/40 transition flex items-center justify-between gap-2.5"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        {member.avatar ? (
+                          <img
+                            src={member.avatar}
+                            alt={member.name}
+                            className="w-9 h-9 rounded-full object-cover border border-[#D4AF37] flex-shrink-0"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-[#0B261C] text-[#D4AF37] font-black text-xs flex items-center justify-center border border-[#D4AF37] flex-shrink-0">
+                            {memberInitials}
+                          </div>
+                        )}
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-xs font-black text-[#0B261C] truncate">
+                              {member.name}
+                            </p>
+                            <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300 px-1.5 py-0.5 rounded-md">
+                              Aktif
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap text-[11px] text-stone-600 mt-0.5">
+                            <span className="font-mono font-bold text-stone-700">
+                              <i className="fa-brands fa-whatsapp text-emerald-600 mr-1"></i>
+                              {member.phone}
+                            </span>
+                            <span className="text-[10px] font-black text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded">
+                              👑 {member.points} Poin
+                            </span>
+                            {memberOrdersCount > 0 && (
+                              <span className="text-[10px] font-semibold text-stone-500">
+                                • {memberOrdersCount}x Booking
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenResetPasswordModal(member)}
+                        className="tactile-btn bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] border border-[#D4AF37] font-black text-[11px] px-2.5 py-2 rounded-xl flex items-center gap-1.5 flex-shrink-0 shadow-2xs"
+                      >
+                        <i className="fa-solid fa-key text-[10px]"></i>
+                        <span>Reset Sandi</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
       )}
 
       {/* ================================================================= */}
@@ -907,48 +1129,36 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                   </a>
                 </div>
               ) : (
-                /* Khusus Admin: Form Bantu Ganti Kata Sandi Member Pelanggan */
-                <form onSubmit={handleAdminResetCustomerPass} className="space-y-2.5">
+                /* Khusus Admin: Daftar Member & Tombol Reset Sandi */
+                <div className="space-y-2.5">
                   <p className="text-[11px] text-stone-600">
-                    <b>Fitur Khusus Admin:</b> Pilih member pelanggan yang meminta bantuan ganti
-                    kata sandi:
+                    <b>Manajemen Reset Sandi Member ({storedCustomers.length} Member Aktif):</b>{' '}
+                    Klik tombol <b>Reset Sandi</b> pada baris pelanggan di bawah ini:
                   </p>
-                  <div>
-                    <label className="text-[10px] font-black text-stone-700 uppercase block mb-1">
-                      Pilih Member Pelanggan
-                    </label>
-                    <select
-                      value={selectedCustomerPhone}
-                      onChange={(e) => setSelectedCustomerPhone(e.target.value)}
-                      className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold bg-white"
-                    >
-                      <option value="">-- Pilih Pelanggan --</option>
-                      {storedCustomers.map((c) => (
-                        <option key={c.phone} value={c.phone}>
-                          {c.name} ({c.phone})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="divide-y divide-stone-200 border border-stone-200 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                    {storedCustomers.map((c) => (
+                      <div
+                        key={normalizePhoneDigits(c.phone)}
+                        className="p-2.5 bg-white flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-black text-[#0B261C] truncate">{c.name}</p>
+                          <p className="text-[11px] font-mono text-stone-600">
+                            {c.phone} • 👑 {c.points} Poin
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenResetPasswordModal(c)}
+                          className="tactile-btn bg-[#0B261C] text-[#D4AF37] border border-[#D4AF37] font-black text-[11px] px-2.5 py-1.5 rounded-xl flex items-center gap-1 flex-shrink-0"
+                        >
+                          <i className="fa-solid fa-key text-[10px]"></i>
+                          <span>Reset Sandi</span>
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <label className="text-[10px] font-black text-stone-700 uppercase block mb-1">
-                      Setel Kata Sandi Baru Pelanggan
-                    </label>
-                    <input
-                      type="text"
-                      value={adminResetNewPass}
-                      onChange={(e) => setAdminResetNewPass(e.target.value)}
-                      placeholder="Masukkan sandi baru minimal 6 karakter..."
-                      className="w-full px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="tactile-btn w-full bg-[#0B261C] text-[#D4AF37] font-black py-2.5 rounded-xl text-xs uppercase"
-                  >
-                    Simpan Sandi Baru Pelanggan
-                  </button>
-                </form>
+                </div>
               )}
             </div>
           )}
@@ -1237,6 +1447,191 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                 <i className="fa-solid fa-circle-check text-emerald-700 text-base"></i>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL RESET KATA SANDI PELANGGAN OLEH ADMIN                       */}
+      {/* ================================================================= */}
+      {isAdmin && resetTargetCustomer && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-page-enter"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Modal Reset Kata Sandi Pelanggan"
+        >
+          <div className="bg-white w-full max-w-md rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden flex flex-col">
+            {/* Header Modal (Hijau Tua & Emas) */}
+            <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white px-4 py-3.5 border-b border-[#D4AF37]/60 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] flex items-center justify-center flex-shrink-0">
+                  <i className="fa-solid fa-key text-xs"></i>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black text-[#D4AF37] truncate">
+                    Reset Kata Sandi Pelanggan
+                  </h3>
+                  <p className="text-[10px] text-emerald-200 truncate">
+                    Perbarui sandi tanpa mengubah poin &amp; status member
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isSubmittingReset) {
+                    setResetTargetCustomer(null);
+                    setResetNewPassword('');
+                    setResetFormError('');
+                  }
+                }}
+                disabled={isSubmittingReset}
+                className="text-stone-300 hover:text-white text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body Form Modal */}
+            <form onSubmit={handleConfirmResetCustomerPassword} className="p-4 space-y-3.5 text-xs">
+              {/* Info Ringkas Akun Pelanggan */}
+              <div className="bg-gradient-to-br from-[#0B261C] to-[#133e2e] text-white p-3.5 rounded-2xl border border-[#D4AF37]/80 space-y-2 shadow-xs">
+                <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37]">
+                    Informasi Akun Member
+                  </span>
+                  <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full">
+                    ✓ Member Aktif ({resetTargetCustomer.points} Poin)
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-stone-300 font-medium">Nama Pelanggan:</span>
+                    <span className="font-black text-white text-right truncate">
+                      {resetTargetCustomer.name}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-stone-300 font-medium">Nomor WhatsApp:</span>
+                    <span className="font-mono font-black text-[#D4AF37] text-right">
+                      <i className="fa-brands fa-whatsapp mr-1 text-emerald-400"></i>
+                      {resetTargetCustomer.phone}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Input Kata Sandi Baru + Tombol Intip & Generate Sandi Acak */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="adminResetPassInput"
+                    className="font-black text-[#0B261C] text-xs"
+                  >
+                    Kata Sandi Baru <span className="text-red-600">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateRandomPassword}
+                    className="tactile-btn bg-amber-50 hover:bg-amber-100 text-[#0B261C] border border-[#D4AF37] font-black text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs"
+                  >
+                    <i className="fa-solid fa-wand-magic-sparkles text-amber-600"></i>
+                    <span>Generate Sandi Acak</span>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <input
+                    id="adminResetPassInput"
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetNewPassword}
+                    onChange={(e) => {
+                      setResetNewPassword(e.target.value);
+                      setResetFormError('');
+                    }}
+                    placeholder="Ketik kata sandi baru (min. 6 karakter)..."
+                    className="w-full pl-3.5 pr-11 py-2.5 rounded-xl bg-stone-50 border-2 border-stone-300 focus:border-[#0B261C] font-mono font-bold text-stone-900 text-xs sm:text-sm focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword((prev) => !prev)}
+                    aria-label={
+                      showResetPassword ? 'Sembunyikan Kata Sandi' : 'Lihat Kata Sandi'
+                    }
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-stone-500 hover:text-[#0B261C] hover:bg-stone-200/60 flex items-center justify-center transition"
+                  >
+                    <i
+                      className={`fa-solid ${
+                        showResetPassword ? 'fa-eye-slash' : 'fa-eye'
+                      } text-xs`}
+                    ></i>
+                  </button>
+                </div>
+                <p className="text-[10px] text-stone-500">
+                  ID pelanggan, nomor WhatsApp, poin loyalitas, dan riwayat transaksi tidak akan berubah.
+                </p>
+              </div>
+
+              {/* Checkbox Kirim Kata Sandi Baru ke WhatsApp Pelanggan via WA Gateway */}
+              <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-emerald-50/90 border border-emerald-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sendWaOnReset}
+                  onChange={(e) => setSendWaOnReset(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-[#0B261C] rounded cursor-pointer flex-shrink-0"
+                />
+                <div className="text-[11px] leading-snug text-emerald-950">
+                  <span className="font-black block">
+                    Kirim kata sandi baru ke WhatsApp pelanggan via WA Gateway
+                  </span>
+                  <span className="text-[10px] text-emerald-800 block mt-0.5">
+                    Otomatis mengirim pesan pemberitahuan sandi baru ke nomor{' '}
+                    <b>{resetTargetCustomer.phone}</b> setelah disimpan.
+                  </span>
+                </div>
+              </label>
+
+              {resetFormError && (
+                <div className="bg-red-50 border border-red-300 text-red-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-triangle-exclamation text-red-600"></i>
+                  <span>{resetFormError}</span>
+                </div>
+              )}
+
+              {/* Tombol Aksi: Batal & Simpan & Perbarui Sandi */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isSubmittingReset}
+                  onClick={() => {
+                    setResetTargetCustomer(null);
+                    setResetNewPassword('');
+                    setResetFormError('');
+                  }}
+                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-2.5 px-4 rounded-xl text-xs"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReset}
+                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl text-xs border border-amber-300 shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  <i
+                    className={`fa-solid ${
+                      isSubmittingReset ? 'fa-spinner fa-spin' : 'fa-floppy-disk'
+                    }`}
+                  ></i>
+                  <span>
+                    {isSubmittingReset
+                      ? 'Menyimpan & Mengirim WA...'
+                      : 'Simpan & Perbarui Sandi'}
+                  </span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

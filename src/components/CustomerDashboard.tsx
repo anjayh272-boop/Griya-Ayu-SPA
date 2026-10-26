@@ -92,6 +92,7 @@ interface CustomerDashboardProps {
     existingOrderId?: number | null;
     silentReceipt?: boolean;
   }) => BookingOrder | null;
+  onCancelPendingBooking?: (orderId: number) => void;
   onRequestRefund?: (orderId: number, refundInfo: RefundRequestInfo) => void;
   onRescheduleBooking?: (
     orderId: number,
@@ -123,6 +124,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   onUpdateUser,
   onOpenPaymentModal,
   onConfirmWizardBooking,
+  onCancelPendingBooking,
   onRequestRefund,
   onRescheduleBooking,
   onRedeemPointReward,
@@ -222,7 +224,37 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     }
   };
 
-  // State Modal Formulir Pengajuan Pembatalan / Refund
+  // State Modal Konfirmasi Pembatalan Pesanan Berstatus "Pending Pembayaran" (1-Klik Tanpa Form Rekening/Bukti Transfer)
+  const [pendingCancelModalOrder, setPendingCancelModalOrder] = useState<BookingOrder | null>(null);
+
+  // Sinkronkan step3PendingOrderId jika pesanan pending tersebut dibatalkan atau kedaluwarsa
+  useEffect(() => {
+    if (!step3PendingOrderId) return;
+    const matched = bookings.find((b) => b.id === step3PendingOrderId);
+    if (matched && matched.status === 'Cancelled') {
+      setStep3PendingOrderId(null);
+      if (bookingStep === 3) {
+        setSelectedTimeSlot(null);
+        setBookingStep(1);
+      }
+    }
+  }, [bookings, step3PendingOrderId, bookingStep]);
+
+  const handleConfirmCancelPendingOrder = () => {
+    if (!pendingCancelModalOrder) return;
+    const targetId = pendingCancelModalOrder.id;
+    if (onCancelPendingBooking) {
+      onCancelPendingBooking(targetId);
+    }
+    if (step3PendingOrderId === targetId) {
+      setStep3PendingOrderId(null);
+      setSelectedTimeSlot(null);
+      setBookingStep(1);
+    }
+    setPendingCancelModalOrder(null);
+  };
+
+  // State Modal Formulir Pengajuan Pembatalan / Refund (Khusus Pesanan Lunas / Terkonfirmasi)
   const [refundModalOrder, setRefundModalOrder] = useState<BookingOrder | null>(null);
   const [refundReason, setRefundReason] = useState<string>('');
   const [refundBankName, setRefundBankName] = useState<string>('Bank BCA');
@@ -332,8 +364,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     const isCashOrder =
       refundModalOrder.payMethodType === 'cash' ||
       refundModalOrder.payMethod.toLowerCase().includes('cash') ||
-      refundModalOrder.payMethod.toLowerCase().includes('tempat') ||
-      refundModalOrder.paymentStatus === 'Pending';
+      refundModalOrder.payMethod.toLowerCase().includes('tempat');
 
     if (!refundReason.trim()) {
       setRefundFormError('Mohon isi alasan pembatalan jadwal terlebih dahulu.');
@@ -839,7 +870,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   );
 
   const pendingUserBookings = userBookings.filter(
-    (b) => b.paymentStatus === 'Pending' && b.expiresAt > nowMs
+    (b) =>
+      b.status === 'Pending_Payment' &&
+      b.paymentStatus === 'Pending' &&
+      b.expiresAt > nowMs
   );
 
   const customerNotifications = notifications.filter(
@@ -1877,7 +1911,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         visitType === 'home_service'
                           ? activeHomeServiceSlotsForSelectedDate
                           : masterTimeSlots,
-                        bookings,
+                        bookings.filter((b) => b.id !== step3PendingOrderId),
                         nowMs
                       );
                       const isSelected = selectedTimeSlot === slot.time;
@@ -2718,18 +2752,41 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   b.status === 'Refund_Completed' ||
                   Boolean(b.refundRequest && b.status === 'Cancelled');
                 const remMs = Math.max(0, b.expiresAt - nowMs);
-                const isFailed =
+
+                // Kondisi 1: Pesanan Pending Pembayaran yang dibatalkan langsung oleh pelanggan (1-Klik)
+                const isCancelledPending =
                   !isPaid &&
                   !isRefundWaiting &&
                   !isRefundDone &&
-                  (b.paymentStatus === 'Gagal' ||
+                  b.status === 'Cancelled' &&
+                  b.paymentStatus === 'Dibatalkan';
+
+                // Kondisi 2: Pesanan Pending Pembayaran yang waktu hitung mundurnya habis (00:00 / Auto-Cancel)
+                const isExpiredPending =
+                  !isPaid &&
+                  !isRefundWaiting &&
+                  !isRefundDone &&
+                  !isCancelledPending &&
+                  (b.paymentStatus === 'Dibatalkan (Waktu Habis / Kedaluwarsa)' ||
                     b.paymentStatus === 'Kedaluwarsa' ||
+                    b.paymentStatus === 'Gagal' ||
                     remMs <= 0);
+
+                // Kondisi 3: Pesanan masih berstatus "Pending Pembayaran" aktif (menunggu transfer / QRIS belum dibayar)
+                const isPendingPayment =
+                  !isPaid &&
+                  !isRefundWaiting &&
+                  !isRefundDone &&
+                  !isCancelledPending &&
+                  !isExpiredPending &&
+                  (b.status === 'Pending_Payment' || b.paymentStatus === 'Pending') &&
+                  remMs > 0;
+
                 const isDone = b.status === 'Completed';
 
-                // Pesanan aktif yang dapat mengajukan pembatalan/refund
-                const isActiveBooking =
-                  !isRefundWaiting && !isRefundDone && !isDone && !isFailed;
+                // Pesanan yang SUDAH LUNAS / TERKONFIRMASI yang dapat mengajukan pembatalan / refund
+                const isActivePaidBooking =
+                  isPaid && !isRefundWaiting && !isRefundDone && !isDone;
                 const refundEligibility = checkBookingRefundEligibility(
                   b.date,
                   b.time,
@@ -2742,9 +2799,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                     className={`bg-white p-4 rounded-2xl border shadow-sm space-y-3 animate-page-enter ${
                       isRefundWaiting
                         ? 'border-2 border-amber-400 bg-amber-50/20'
-                        : isRefundDone
+                        : isRefundDone || isCancelledPending
                         ? 'border-stone-200 bg-stone-50/70 opacity-90'
-                        : isFailed
+                        : isExpiredPending
                         ? 'border-2 border-red-300 bg-red-50/20'
                         : isPaid
                         ? 'border-stone-200/90'
@@ -2768,6 +2825,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                                   : 'DIBATALKAN • Jadwal Tidak Terkunci'}
                               </span>
                             </span>
+                          ) : isCancelledPending ? (
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-stone-200 text-stone-800 border border-stone-400 inline-flex items-center gap-1">
+                              <i className="fa-solid fa-ban text-stone-700"></i>
+                              <span>DIBATALKAN • Slot Jadwal Dilepaskan</span>
+                            </span>
                           ) : isConfirmedAcc ? (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
                               ✓ LUNAS • TERKONFIRMASI ADMIN
@@ -2780,13 +2842,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-400">
                               ✓ STATUS: LUNAS (Jam Terkunci)
                             </span>
-                          ) : isFailed ? (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300">
-                              ✕ STATUS: GAGAL (Waktu 20 Menit Habis)
+                          ) : isExpiredPending ? (
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300 inline-flex items-center gap-1">
+                              <i className="fa-solid fa-hourglass-end text-red-600"></i>
+                              <span>Dibatalkan (Waktu Habis / Kedaluwarsa)</span>
                             </span>
                           ) : (
                             <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-400 animate-pulse">
-                              ⏳ STATUS: PENDING (Sisa Waktu {formatCountdown(remMs)})
+                              ⏳ PENDING PEMBAYARAN
                             </span>
                           )}
 
@@ -2830,35 +2893,59 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </span>
                     </div>
 
-                    {/* Keterangan jika waktu 20 menit sudah berakhir (GAGAL) */}
-                    {isFailed && (
-                      <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 text-[11px] text-red-800 flex items-start gap-2">
-                        <i className="fa-solid fa-ban text-red-600 mt-0.5 flex-shrink-0"></i>
+                    {/* Keterangan jika pesanan Pending dibatalkan langsung oleh pelanggan */}
+                    {isCancelledPending && (
+                      <div className="bg-stone-100 border border-stone-300 rounded-xl p-2.5 text-[11px] text-stone-700 flex items-start gap-2">
+                        <i className="fa-solid fa-circle-check text-emerald-700 mt-0.5 flex-shrink-0"></i>
                         <span>
-                          <b>Batas waktu pembayaran 20 menit telah berakhir (GAGAL).</b> Anda tidak
-                          dapat melakukan pembayaran lagi pada pesanan ini. Silakan buat booking
-                          baru di menu Booking.
+                          <b>Status: Dibatalkan.</b> Pesanan ini telah dibatalkan sebelum pembayaran
+                          dan slot jadwal <b>{b.time} WIB</b> telah dilepaskan kembali.
                         </span>
                       </div>
                     )}
 
-                    {/* Keterangan jika masih Pending (< 20 Menit) */}
-                    {!isPaid && !isFailed && !isRefundWaiting && !isRefundDone && (
-                      <div className="bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-[11px] text-amber-950 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <i className="fa-solid fa-stopwatch text-amber-700 animate-bounce"></i>
-                          <span>
-                            Selesaikan pembayaran sebelum <b>{formatCountdown(remMs)}</b> berakhir agar pesanan tidak gagal.
+                    {/* Keterangan jika waktu hitung mundur habis (00:00) -> Auto-Cancel / Kedaluwarsa */}
+                    {isExpiredPending && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 text-[11px] text-red-800 flex items-start gap-2">
+                        <i className="fa-solid fa-ban text-red-600 mt-0.5 flex-shrink-0"></i>
+                        <span>
+                          <b>Dibatalkan (Waktu Habis / Kedaluwarsa).</b> Batas waktu hitung mundur
+                          pembayaran telah habis (00:00) dan slot jadwal <b>{b.time} WIB</b> telah
+                          dilepaskan secara otomatis. Silakan buat booking baru di menu Booking.
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Penghitung Waktu Mundur (Countdown Timer) "Sisa Waktu Pembayaran / Booking" saat Status Pending Pembayaran */}
+                    {isPendingPayment && (
+                      <div className="bg-gradient-to-r from-amber-50 via-amber-100/70 to-amber-50 border-2 border-[#D4AF37] rounded-2xl p-3 text-xs text-[#0B261C] flex items-center justify-between gap-2.5 shadow-2xs">
+                        <div className="flex items-start gap-2 min-w-0">
+                          <div className="w-8 h-8 rounded-xl bg-[#0B261C] text-[#D4AF37] flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <i className="fa-solid fa-stopwatch animate-bounce text-xs"></i>
+                          </div>
+                          <div className="min-w-0">
+                            <span className="font-black text-[11px] uppercase tracking-wide text-[#0B261C] block">
+                              Sisa Waktu Pembayaran / Booking
+                            </span>
+                            <span className="text-[11px] text-stone-700 leading-snug block mt-0.5">
+                              Selesaikan pembayaran sebelum waktu habis (00:00) agar jadwal tidak
+                              otomatis dibatalkan.
+                            </span>
+                          </div>
+                        </div>
+                        <div className="bg-[#0B261C] text-[#D4AF37] border border-[#D4AF37] px-3 py-1.5 rounded-xl text-right flex-shrink-0 shadow-xs">
+                          <span className="text-[9px] font-bold text-emerald-200 block uppercase leading-none">
+                            Timer
+                          </span>
+                          <span className="font-mono font-black text-sm block mt-0.5">
+                            {formatCountdown(remMs)}
                           </span>
                         </div>
-                        <span className="font-mono font-black text-xs bg-[#0B261C] text-[#D4AF37] px-2.5 py-1 rounded-lg flex-shrink-0">
-                          {formatCountdown(remMs)}
-                        </span>
                       </div>
                     )}
 
                     {/* Keterangan jika sebelumnya pengajuan refund pernah ditolak Admin */}
-                    {b.refundRejectedReason && isActiveBooking && (
+                    {b.refundRejectedReason && isActivePaidBooking && (
                       <div className="bg-red-50 border border-red-200 rounded-xl p-2.5 text-[11px] text-red-800 space-y-0.5">
                         <span className="font-black block">
                           <i className="fa-solid fa-circle-exclamation mr-1"></i>
@@ -2961,14 +3048,23 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       )}
 
                       <div className="flex flex-col sm:flex-row gap-2">
-                        {isFailed ? (
+                        {isExpiredPending ? (
                           <button
                             type="button"
                             disabled
                             className="flex-1 min-h-[44px] bg-stone-200 text-stone-500 border border-stone-300 font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 cursor-not-allowed opacity-85"
                           >
                             <i className="fa-solid fa-lock"></i>
-                            <span>Waktu 20 Menit Habis — Tidak Bisa Bayar Lagi</span>
+                            <span>Dibatalkan (Waktu Habis / Kedaluwarsa)</span>
+                          </button>
+                        ) : isCancelledPending ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="flex-1 min-h-[44px] bg-stone-200 text-stone-600 border border-stone-300 font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 cursor-not-allowed opacity-85"
+                          >
+                            <i className="fa-solid fa-ban"></i>
+                            <span>Pesanan Telah Dibatalkan</span>
                           </button>
                         ) : (
                           <button
@@ -2989,8 +3085,20 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           </button>
                         )}
 
-                        {/* Tombol Batalkan Booking / Ajukan Refund pada Setiap Pesanan Aktif */}
-                        {isActiveBooking && (
+                        {/* Kondisi Khusus Status "Pending Pembayaran": Tombol "Batalkan Pesanan" (1-Klik Konfirmasi Tanpa Form Rekening/Bukti Transfer) */}
+                        {isPendingPayment && (
+                          <button
+                            type="button"
+                            onClick={() => setPendingCancelModalOrder(b)}
+                            className="tactile-btn flex-1 min-h-[44px] bg-red-50 hover:bg-red-100 text-red-800 border-2 border-red-300 font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xs transition"
+                          >
+                            <i className="fa-solid fa-xmark"></i>
+                            <span>Batalkan Pesanan</span>
+                          </button>
+                        )}
+
+                        {/* Alur Refund / Pembatalan Khusus untuk Pesanan yang Sudah Lunas / Terkonfirmasi */}
+                        {isActivePaidBooking && (
                           <button
                             type="button"
                             disabled={!refundEligibility.canRefund}
@@ -3012,8 +3120,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                             ></i>
                             <span>
                               {b.payMethodType === 'cash' ||
-                              b.payMethod.toLowerCase().includes('cash') ||
-                              b.paymentStatus === 'Pending'
+                              b.payMethod.toLowerCase().includes('cash')
                                 ? 'Batalkan Booking'
                                 : 'Batalkan & Ajukan Refund'}
                             </span>
@@ -3022,7 +3129,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </div>
 
                       {/* Tombol Reschedule Mandiri (Hanya untuk Booking Confirmed / Lunas, Maks. 4 Jam Sebelum Jadwal Awal) */}
-                      {isPaid && isActiveBooking && (() => {
+                      {isActivePaidBooking && (() => {
                         const rescheduleEligibility = checkBookingRescheduleEligibility(
                           b.date,
                           b.time,
@@ -3074,8 +3181,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         );
                       })()}
 
-                      {/* Keterangan Batas Waktu 1 Jam Sebelum Jadwal SPA Dimulai */}
-                      {isActiveBooking && !refundEligibility.canRefund && (
+                      {/* Keterangan Batas Waktu 1 Jam Sebelum Jadwal SPA Dimulai (Khusus Pesanan Lunas/Terkonfirmasi) */}
+                      {isActivePaidBooking && !refundEligibility.canRefund && (
                         <p className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 leading-relaxed flex items-start gap-1.5">
                           <i className="fa-solid fa-circle-exclamation mt-0.5 flex-shrink-0"></i>
                           <span>
@@ -3085,7 +3192,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         </p>
                       )}
 
-                      {isActiveBooking && refundEligibility.canRefund && (
+                      {isActivePaidBooking && refundEligibility.canRefund && (
                         <p className="text-[10px] text-stone-500 flex items-center justify-between px-1">
                           <span>
                             <i className="fa-regular fa-clock mr-1 text-emerald-700"></i>
@@ -3102,6 +3209,94 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL KONFIRMASI SEDERHANA BATALKAN PESANAN PENDING (1-KLIK)      */}
+      {/* ================================================================= */}
+      {pendingCancelModalOrder && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pendingCancelModalTitle"
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade"
+        >
+          <div className="bg-[#F9F6F0] w-full max-w-sm rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden animate-modal-pop">
+            {/* Header Modal Konfirmasi Batalkan Pesanan */}
+            <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white p-4 border-b border-[#D4AF37]/60 flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/50 text-[#D4AF37] flex items-center justify-center flex-shrink-0">
+                  <i className="fa-solid fa-calendar-xmark text-sm"></i>
+                </div>
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-[#D4AF37] block">
+                    Pending Pembayaran
+                  </span>
+                  <h3 id="pendingCancelModalTitle" className="text-sm font-black text-white">
+                    Konfirmasi Batalkan Pesanan
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingCancelModalOrder(null)}
+                aria-label="Tutup Konfirmasi Pembatalan"
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-xs font-black"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3.5 text-xs">
+              {/* Ringkasan Singkat Pesanan Pending */}
+              <div className="bg-white p-3 rounded-2xl border border-stone-200/90 shadow-xs space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-stone-400 uppercase font-mono">
+                    #GA-{String(pendingCancelModalOrder.id).slice(-6)}
+                  </span>
+                  <span className="text-xs font-black text-[#0B261C]">
+                    {formatRupiah(pendingCancelModalOrder.total)}
+                  </span>
+                </div>
+                <p className="font-black text-[#0B261C] text-xs leading-snug">
+                  {pendingCancelModalOrder.items}
+                </p>
+                <p className="text-[11px] text-stone-600">
+                  📅 {pendingCancelModalOrder.datePretty} • Jam{' '}
+                  <b>{pendingCancelModalOrder.time} WIB</b>
+                </p>
+              </div>
+
+              {/* Pesan Konfirmasi Sederhana */}
+              <div className="bg-amber-50 border border-[#D4AF37]/70 rounded-2xl p-3.5 text-stone-800 leading-relaxed flex items-start gap-2.5">
+                <i className="fa-solid fa-circle-question text-amber-700 text-base mt-0.5 flex-shrink-0"></i>
+                <p className="font-bold text-xs text-[#0B261C] leading-relaxed">
+                  Apakah Anda yakin ingin membatalkan pesanan ini? Slot jadwal yang Anda pilih akan
+                  dilepaskan kembali.
+                </p>
+              </div>
+
+              {/* Tombol Pilihan: "Ya, Batalkan" dan "Kembali" */}
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingCancelModalOrder(null)}
+                  className="tactile-btn min-h-[44px] bg-stone-200 hover:bg-stone-300 text-stone-800 font-black py-2.5 px-4 rounded-2xl text-xs border border-stone-300 transition"
+                >
+                  Kembali
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCancelPendingOrder}
+                  className="tactile-btn min-h-[44px] bg-red-600 hover:bg-red-700 text-white font-black py-2.5 px-4 rounded-2xl text-xs shadow-md border border-red-700 flex items-center justify-center gap-1.5 transition"
+                >
+                  <i className="fa-solid fa-check"></i>
+                  <span>Ya, Batalkan</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

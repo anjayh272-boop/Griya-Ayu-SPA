@@ -54,11 +54,13 @@ function sanitizeCustomerPayload(user: User): User & { updatedAt: number } {
     user.avatar && user.avatar.length <= MAX_IMAGE_CHARS ? user.avatar : undefined;
 
   return stripUndefined({
+    id: user.id || cleanPhone || '0800000000',
     name: (user.name || 'Member Griya Ayu').trim().slice(0, 120) || 'Member Griya Ayu',
     phone: cleanPhone || '0800000000',
     pass: (user.pass || '123456').slice(0, 120),
     points: Math.max(0, Math.min(1_000_000, Number(user.points) || 0)),
-    role: user.role || 'customer',
+    role: user.role === 'admin' ? 'admin' : user.role || 'customer',
+    status: user.status || 'active',
     avatar,
     updatedAt: Date.now(),
   });
@@ -130,7 +132,7 @@ export async function syncCustomerToCloud(user: User): Promise<void> {
   const path = `${CLOUD_COLLECTIONS.CUSTOMERS}/${docId}`;
   try {
     const payload = sanitizeCustomerPayload(user);
-    await setDoc(doc(db, CLOUD_COLLECTIONS.CUSTOMERS, docId), payload);
+    await setDoc(doc(db, CLOUD_COLLECTIONS.CUSTOMERS, docId), payload, { merge: true });
   } catch (error) {
     try {
       handleFirestoreError(error, OperationType.WRITE, path);
@@ -138,6 +140,38 @@ export async function syncCustomerToCloud(user: User): Promise<void> {
       // Non-fatal: tetap berjalan dengan cache lokal bila koneksi sedang terputus
     }
   }
+}
+
+/**
+ * Update HANYA field kata sandi (pass) milik pelanggan tertentu di Firestore
+ * tanpa membuat dokumen baru dan tanpa mengubah ID, nomor WA, poin, maupun status member.
+ */
+export async function updateCustomerPasswordInCloud(
+  existingCustomer: User,
+  newPassword: string
+): Promise<User> {
+  const cleanPhone = normalizePhoneDigits(existingCustomer.phone);
+  const updatedCustomer: User = {
+    ...existingCustomer,
+    id: existingCustomer.id || cleanPhone,
+    phone: cleanPhone || existingCustomer.phone,
+    pass: newPassword.trim(),
+    role: existingCustomer.role === 'admin' ? 'admin' : existingCustomer.role || 'customer',
+    status: existingCustomer.status || 'active',
+  };
+  if (!cleanPhone || cleanPhone.length < 5) return updatedCustomer;
+  const path = `${CLOUD_COLLECTIONS.CUSTOMERS}/${cleanPhone}`;
+  try {
+    const payload = sanitizeCustomerPayload(updatedCustomer);
+    await setDoc(doc(db, CLOUD_COLLECTIONS.CUSTOMERS, cleanPhone), payload, { merge: true });
+  } catch (error) {
+    try {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    } catch {
+      // Non-fatal: tetap tersimpan di localStorage bila offline
+    }
+  }
+  return updatedCustomer;
 }
 
 /**

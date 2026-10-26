@@ -1,11 +1,13 @@
 export type Language = 'id' | 'en';
 
 export interface User {
+  id?: string;
   name: string;
   phone: string;
   pass: string;
   points: number;
-  role?: 'customer' | 'admin';
+  role?: 'customer' | 'member' | 'admin';
+  status?: 'active' | 'inactive';
   avatar?: string;
 }
 
@@ -87,6 +89,8 @@ export interface BookingOrder {
     | 'Terkonfirmasi (ACC Admin)'
     | 'Gagal'
     | 'Kedaluwarsa'
+    | 'Dibatalkan'
+    | 'Dibatalkan (Waktu Habis / Kedaluwarsa)'
     | 'Menunggu Cek Refund Admin'
     | 'Refund Selesai / Dibatalkan';
   expiresAt: number; // epoch ms (createdAt + 20 minutes)

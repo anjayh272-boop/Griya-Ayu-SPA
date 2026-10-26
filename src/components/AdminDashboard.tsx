@@ -26,6 +26,7 @@ import {
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
   normalizeHomeServiceSchedule,
+  getValidMemberCustomers,
 } from '../utils/spaLogic.ts';
 import {
   PROMO_TEMPLATES,
@@ -458,8 +459,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const storedCustomers: User[] = React.useMemo(() => {
-    if (customers && customers.length > 0) return customers;
-    return loadCustomersPersistently(INITIAL_USERS);
+    const rawList =
+      customers && customers.length > 0
+        ? customers
+        : loadCustomersPersistently(INITIAL_USERS);
+    return getValidMemberCustomers(rawList);
   }, [customers, adminSubTab, bookings.length]);
 
   const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -1080,8 +1084,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* Shortcut Cepat ke Pengaturan Jadwal Home Service */}
-        <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
+        {/* Shortcut Cepat ke Pengaturan Jadwal Home Service & Data Member */}
+        <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 min-w-0">
             <span
               className={`w-2 h-2 rounded-full flex-shrink-0 ${
@@ -1091,22 +1095,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span className="text-[11px] font-bold text-stone-200 truncate">
               Home Service:{' '}
               <strong className={hsDraft.enabled ? 'text-emerald-300' : 'text-red-300'}>
-                {hsDraft.enabled ? 'Aktif' : 'Nonaktif Sementara'}
+                {hsDraft.enabled ? 'Aktif' : 'Nonaktif'}
               </strong>{' '}
-              ({hsDraft.days.filter((d) => d.isOpen).length}/7 Hari Buka)
+              ({hsDraft.days.filter((d) => d.isOpen).length}/7 Hari)
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setAdminSubTab('schedule');
-              setScheduleSectionTab('home_service');
-            }}
-            className="tactile-btn bg-[#D4AF37]/20 hover:bg-[#D4AF37]/30 text-[#D4AF37] border border-[#D4AF37]/60 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 flex-shrink-0"
-          >
-            <i className="fa-solid fa-car-side"></i>
-            <span>Jadwal Home Service</span>
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setAdminSubTab('account')}
+              className="tactile-btn bg-white/10 hover:bg-white/20 text-amber-200 border border-[#D4AF37]/50 text-[10px] font-black px-2 py-1 rounded-lg flex items-center gap-1"
+            >
+              <i className="fa-solid fa-users-gear text-[#D4AF37]"></i>
+              <span>Data Member ({storedCustomers.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminSubTab('schedule');
+                setScheduleSectionTab('home_service');
+              }}
+              className="tactile-btn bg-[#D4AF37]/20 hover:bg-[#D4AF37]/30 text-[#D4AF37] border border-[#D4AF37]/60 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1"
+            >
+              <i className="fa-solid fa-car-side"></i>
+              <span>Jadwal Home Service</span>
+            </button>
+          </div>
         </div>
       </header>
 

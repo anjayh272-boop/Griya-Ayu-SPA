@@ -195,8 +195,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           >
             {isLocked
               ? `STATUS: ${order.paymentStatus.toUpperCase()} • JAM TERKUNCI`
-              : isExpired
-              ? 'STATUS PEMBAYARAN: KEDALUWARSA (20 MENIT HABIS)'
+              : order.paymentStatus === 'Dibatalkan'
+              ? 'STATUS PESANAN: DIBATALKAN (SLOT DILEPASKAN)'
+              : order.paymentStatus === 'Dibatalkan (Waktu Habis / Kedaluwarsa)' || isExpired
+              ? 'DIBATALKAN (WAKTU HABIS / KEDALUWARSA)'
               : isFailed
               ? 'STATUS PEMBAYARAN: GAGAL (BELUM LUNAS)'
               : `STATUS PEMBAYARAN: PENDING (${formatCountdown(remainingMs)})`}
@@ -238,6 +240,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 ) : isLocked ? (
                   <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-flex items-center gap-1">
                     <i className="fa-solid fa-check text-[9px]"></i> {order.paymentStatus}
+                  </span>
+                ) : order.paymentStatus === 'Dibatalkan' ? (
+                  <span className="text-[10px] font-black text-stone-700 bg-stone-200 px-2 py-0.5 rounded border border-stone-400 inline-flex items-center gap-1">
+                    <i className="fa-solid fa-ban text-[9px]"></i> DIBATALKAN
+                  </span>
+                ) : order.paymentStatus === 'Dibatalkan (Waktu Habis / Kedaluwarsa)' || isExpired ? (
+                  <span className="text-[10px] font-black text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200 inline-flex items-center gap-1">
+                    <i className="fa-solid fa-hourglass-end text-[9px]"></i> Dibatalkan (Kedaluwarsa)
                   </span>
                 ) : isFailed ? (
                   <span className="text-[10px] font-black text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200 inline-flex items-center gap-1">
