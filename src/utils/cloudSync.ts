@@ -12,6 +12,7 @@ import { db, handleFirestoreError, OperationType } from '../lib/firebase.ts';
 import {
   AppNotification,
   BookingOrder,
+  HomeServiceScheduleConfig,
   PointReward,
   ServiceItem,
   TimeSlot,
@@ -27,11 +28,13 @@ export const CLOUD_COLLECTIONS = {
 } as const;
 
 export const SETTINGS_DOC_ID = 'settings';
+export const HOME_SERVICE_DOC_ID = 'home_service_schedule';
 
 export interface GlobalSpaSettingsDoc {
   timeSlots?: TimeSlot[];
   closedWeekdays?: number[];
   closedSpecificDates?: string[];
+  homeServiceSchedule?: HomeServiceScheduleConfig;
   adminProfile?: User;
   pointRewards?: PointReward[];
   singleServices?: ServiceItem[];
@@ -285,6 +288,15 @@ export async function syncSpaSettingsToCloud(
     await setDoc(doc(db, CLOUD_COLLECTIONS.CONFIG, SETTINGS_DOC_ID), cleaned, {
       merge: true,
     });
+    if (partialSettings.homeServiceSchedule) {
+      const hsPayload = stripUndefined({
+        ...partialSettings.homeServiceSchedule,
+        updatedAt: new Date().toISOString(),
+      });
+      await setDoc(doc(db, CLOUD_COLLECTIONS.CONFIG, HOME_SERVICE_DOC_ID), hsPayload, {
+        merge: true,
+      });
+    }
   } catch (error) {
     try {
       handleFirestoreError(error, OperationType.WRITE, path);

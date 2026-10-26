@@ -8,6 +8,7 @@ import {
   PointReward,
   ServiceItem,
   ServiceGridCategory,
+  HomeServiceScheduleConfig,
 } from '../types/index.ts';
 import {
   formatRupiah,
@@ -24,6 +25,7 @@ import {
   buildAdminWaConfirmationMessage,
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
+  normalizeHomeServiceSchedule,
 } from '../utils/spaLogic.ts';
 import {
   PROMO_TEMPLATES,
@@ -31,6 +33,7 @@ import {
   POINT_REWARDS,
   SINGLE_CATALOG,
   PACKAGE_CATALOG,
+  DEFAULT_HOME_SERVICE_SCHEDULE,
 } from '../data/mockData.ts';
 import { AccountPanel } from './AccountPanel.tsx';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
@@ -46,6 +49,7 @@ interface AdminDashboardProps {
   packageServices?: ServiceItem[];
   closedWeekdays: number[];
   closedSpecificDates: string[];
+  homeServiceSchedule?: HomeServiceScheduleConfig;
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
@@ -55,6 +59,7 @@ interface AdminDashboardProps {
     nextSingleServices: ServiceItem[],
     nextPackageServices: ServiceItem[]
   ) => void;
+  onUpdateHomeServiceSchedule?: (nextSchedule: HomeServiceScheduleConfig) => void;
   onVerifyPayment: (orderId: number) => void;
   onCompleteTreatment: (orderId: number) => void;
   onApproveRefund: (orderId: number) => void;
@@ -95,12 +100,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   packageServices,
   closedWeekdays,
   closedSpecificDates,
+  homeServiceSchedule,
   language,
   onChangeLanguage,
   onUpdateUser,
   onUpdateCustomerAccount,
   onUpdatePointRewards,
   onUpdateServices,
+  onUpdateHomeServiceSchedule,
   onVerifyPayment,
   onCompleteTreatment,
   onApproveRefund,
@@ -141,6 +148,184 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, []);
   const [customDateInput, setCustomDateInput] = useState<string>(() => getTodayIso());
   const [newSlotTimeInput, setNewSlotTimeInput] = useState<string>('20:30');
+  const [scheduleSectionTab, setScheduleSectionTab] = useState<'studio' | 'home_service'>(
+    'home_service'
+  );
+  const [hsDraft, setHsDraft] = useState<HomeServiceScheduleConfig>(() =>
+    normalizeHomeServiceSchedule(homeServiceSchedule || DEFAULT_HOME_SERVICE_SCHEDULE)
+  );
+  const [newHsSlotInput, setNewHsSlotInput] = useState<string>('10:00');
+  const [hasUnsavedHsChanges, setHasUnsavedHsChanges] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (homeServiceSchedule) {
+      setHsDraft(normalizeHomeServiceSchedule(homeServiceSchedule));
+      setHasUnsavedHsChanges(false);
+    }
+  }, [homeServiceSchedule]);
+
+  const handleToggleHsGlobalStatus = () => {
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      enabled: !hsDraft.enabled,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(false);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+    onShowToast(
+      nextConfig.enabled
+        ? 'Layanan Home Service Diaktifkan! 🚗✅'
+        : 'Home Service Dinonaktifkan Sementara ⏸️',
+      nextConfig.enabled
+        ? 'Pelanggan kini dapat memilih lokasi Home Service sesuai jadwal hari & jam yang aktif.'
+        : 'Layanan Home Service ditutup sementara (misal seluruh terapis sedang penuh). Pelanggan akan diarahkan ke sesi Studio.'
+    );
+  };
+
+  const handleToggleHsDayOpen = (dayOfWeek: number) => {
+    const nextDays = hsDraft.days.map((d) =>
+      d.dayOfWeek === dayOfWeek ? { ...d, isOpen: !d.isOpen } : d
+    );
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      days: nextDays,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(true);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+  };
+
+  const handleChangeHsDayHours = (
+    dayOfWeek: number,
+    field: 'openTime' | 'closeTime',
+    value: string
+  ) => {
+    if (!value) return;
+    const nextDays = hsDraft.days.map((d) =>
+      d.dayOfWeek === dayOfWeek ? { ...d, [field]: value } : d
+    );
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      days: nextDays,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(true);
+  };
+
+  const handleApplyHoursToAllDays = (openTime: string, closeTime: string) => {
+    const nextDays = hsDraft.days.map((d) => ({
+      ...d,
+      openTime,
+      closeTime,
+    }));
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      days: nextDays,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(true);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+    onShowToast(
+      'Jam Operasional Diterapkan ke Semua Hari 🕒',
+      `Jam operasional ${openTime} - ${closeTime} WIB telah diterapkan untuk Senin s/d Minggu.`
+    );
+  };
+
+  const handleToggleHsSlotActive = (slotTime: string) => {
+    const nextSlots = hsDraft.slots.map((s) =>
+      s.time === slotTime ? { ...s, active: !s.active } : s
+    );
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      slots: nextSlots,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(true);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+  };
+
+  const handleAddHsSlot = () => {
+    const cleanTime = (newHsSlotInput || '').trim();
+    if (!/^\d{2}:\d{2}$/.test(cleanTime)) {
+      onShowToast('Format Jam Tidak Valid', 'Silakan pilih jam dengan format HH:MM (contoh 10:00).');
+      return;
+    }
+    if (hsDraft.slots.some((s) => s.time === cleanTime)) {
+      onShowToast(
+        'Slot Jam Sudah Ada',
+        `Slot jam Home Service ${cleanTime} WIB sudah ada di dalam daftar.`
+      );
+      return;
+    }
+    const nextSlots = [...hsDraft.slots, { time: cleanTime, active: true }].sort((a, b) =>
+      a.time.localeCompare(b.time)
+    );
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      slots: nextSlots,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(true);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+    onShowToast(
+      'Slot Jam Home Service Ditambahkan! ➕',
+      `Slot jam ${cleanTime} WIB berhasil ditambahkan ke daftar jadwal Home Service.`
+    );
+  };
+
+  const handleRemoveHsSlot = (slotTime: string) => {
+    if (hsDraft.slots.length <= 1) {
+      onShowToast(
+        'Minimal 1 Slot Jam',
+        'Daftar slot jam Home Service harus menyisakan minimal 1 slot waktu.'
+      );
+      return;
+    }
+    const nextSlots = hsDraft.slots.filter((s) => s.time !== slotTime);
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      slots: nextSlots,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(true);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+    onShowToast(
+      'Slot Jam Dihapus 🗑️',
+      `Slot jam Home Service ${slotTime} WIB telah dihapus dari daftar.`
+    );
+  };
+
+  const handleSaveHomeServiceSchedule = () => {
+    const nextConfig: HomeServiceScheduleConfig = {
+      ...hsDraft,
+      updatedAt: new Date().toISOString(),
+    };
+    setHsDraft(nextConfig);
+    setHasUnsavedHsChanges(false);
+    onUpdateHomeServiceSchedule?.(nextConfig);
+    onShowToast(
+      'Pengaturan Jadwal Home Service Disimpan! ✅',
+      'Perubahan hari operasional, jam buka-tutup, dan slot waktu Home Service telah berhasil disimpan dan langsung tersinkronisasi ke halaman booking pelanggan.'
+    );
+  };
+
+  const handleResetHomeServiceDefault = () => {
+    const defaultCfg = normalizeHomeServiceSchedule(DEFAULT_HOME_SERVICE_SCHEDULE);
+    setHsDraft(defaultCfg);
+    setHasUnsavedHsChanges(false);
+    onUpdateHomeServiceSchedule?.(defaultCfg);
+    onShowToast(
+      'Jadwal Home Service Direset ke Default 🔄',
+      'Jadwal Home Service telah dikembalikan ke pengaturan awal (Senin - Minggu aktif, jam 09:00 - 20:00 WIB).'
+    );
+  };
   const [expandedConfirmOrderId, setExpandedConfirmOrderId] = useState<number | null>(null);
   const [previewProofOrder, setPreviewProofOrder] = useState<BookingOrder | null>(null);
   const [proofZoomLevel, setProofZoomLevel] = useState<number>(1);
@@ -893,6 +1078,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span>{isEn ? 'Account' : 'Akun'}</span>
             </button>
           </div>
+        </div>
+
+        {/* Shortcut Cepat ke Pengaturan Jadwal Home Service */}
+        <div className="mt-2.5 pt-2.5 border-t border-white/10 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                hsDraft.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'
+              }`}
+            ></span>
+            <span className="text-[11px] font-bold text-stone-200 truncate">
+              Home Service:{' '}
+              <strong className={hsDraft.enabled ? 'text-emerald-300' : 'text-red-300'}>
+                {hsDraft.enabled ? 'Aktif' : 'Nonaktif Sementara'}
+              </strong>{' '}
+              ({hsDraft.days.filter((d) => d.isOpen).length}/7 Hari Buka)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setAdminSubTab('schedule');
+              setScheduleSectionTab('home_service');
+            }}
+            className="tactile-btn bg-[#D4AF37]/20 hover:bg-[#D4AF37]/30 text-[#D4AF37] border border-[#D4AF37]/60 text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 flex-shrink-0"
+          >
+            <i className="fa-solid fa-car-side"></i>
+            <span>Jadwal Home Service</span>
+          </button>
         </div>
       </header>
 
@@ -2279,164 +2493,506 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         {/* =============================================================== */}
-        {/* SUB-TAB 3: ATUR JAM OPERASIONAL & HARI LIBUR                    */}
+        {/* SUB-TAB 3: ATUR JAM OPERASIONAL STUDIO & JADWAL HOME SERVICE    */}
         {/* =============================================================== */}
         {adminSubTab === 'schedule' && (
           <div className="space-y-3 animate-page-enter">
-            {/* 1. Atur Hari Libur Rutin Mingguan */}
-            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
-              <div className="flex justify-between items-center gap-2 flex-wrap">
-                <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
-                  <i className="fa-solid fa-calendar-xmark text-red-600"></i>
-                  <span>1. Atur Libur Mingguan</span>
-                </h3>
-                <span className="text-[11px] font-bold text-stone-500">Klik Hari untuk Ubah</span>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5">
-                {dayNames.map((name, idx) => {
-                  const isOff = closedWeekdays.includes(idx);
-                  return (
+            {/* Sub-Navigasi Pilihan: Jadwal Home Service vs Jadwal Studio */}
+            <div className="bg-[#0B261C] p-1.5 rounded-2xl border-2 border-[#D4AF37] shadow-md grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setScheduleSectionTab('home_service')}
+                className={`tactile-btn py-2.5 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+                  scheduleSectionTab === 'home_service'
+                    ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-sm'
+                    : 'bg-white/5 text-stone-200 hover:bg-white/10'
+                }`}
+              >
+                <i className="fa-solid fa-car-side"></i>
+                <span>Jadwal Home Service</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setScheduleSectionTab('studio')}
+                className={`tactile-btn py-2.5 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+                  scheduleSectionTab === 'studio'
+                    ? 'bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-sm'
+                    : 'bg-white/5 text-stone-200 hover:bg-white/10'
+                }`}
+              >
+                <i className="fa-solid fa-house-chimney-medical"></i>
+                <span>Jadwal Studio</span>
+              </button>
+            </div>
+
+            {/* =========================================================== */}
+            {/* TAB A: PENGATURAN JADWAL OPERASIONAL HOME SERVICE (DINAMIS) */}
+            {/* =========================================================== */}
+            {scheduleSectionTab === 'home_service' && (
+              <div className="space-y-3 animate-page-enter">
+                {/* 1. Toggle Cepat Status Layanan Home Service (Aktif / Nonaktif Sementara) */}
+                <div
+                  className={`p-4 rounded-2xl border-2 shadow-sm transition space-y-2.5 ${
+                    hsDraft.enabled
+                      ? 'bg-gradient-to-br from-[#0B261C] via-[#123d2d] to-[#0B261C] text-white border-[#D4AF37]'
+                      : 'bg-gradient-to-br from-stone-900 via-red-950 to-stone-900 text-white border-red-400'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <span
+                        className={`inline-flex items-center gap-1.5 text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border ${
+                          hsDraft.enabled
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                            : 'bg-red-500/25 text-red-200 border-red-400/50'
+                        }`}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            hsDraft.enabled ? 'bg-emerald-400 animate-ping' : 'bg-red-400'
+                          }`}
+                        ></span>
+                        <span>
+                          {hsDraft.enabled
+                            ? 'LAYANAN HOME SERVICE AKTIF'
+                            : 'NONAKTIF SEMENTARA (TERAPIS PENUH)'}
+                        </span>
+                      </span>
+                      <h3 className="text-sm sm:text-base font-black text-[#D4AF37] leading-snug">
+                        Status Layanan Home Service
+                      </h3>
+                      <p className="text-[11px] text-stone-200 leading-relaxed">
+                        Matikan toggle ini jika sewaktu-waktu seluruh terapis sedang penuh agar pelanggan tidak bisa memesan sesi Home Service sementara waktu.
+                      </p>
+                    </div>
+
+                    {/* Toggle Switch Besar */}
                     <button
-                      key={name}
                       type="button"
-                      onClick={() => onToggleWeekdayHoliday(idx)}
-                      className={`tactile-btn py-2 px-1.5 rounded-xl border text-xs font-black transition truncate ${
-                        isOff
-                          ? 'bg-red-600 text-white border-red-700 shadow-xs'
-                          : 'bg-emerald-50 text-emerald-950 border-emerald-200 hover:border-emerald-400'
+                      role="switch"
+                      aria-checked={hsDraft.enabled}
+                      onClick={handleToggleHsGlobalStatus}
+                      className={`tactile-btn px-3.5 py-2.5 rounded-2xl font-black text-xs border-2 flex items-center gap-2 flex-shrink-0 shadow-md transition ${
+                        hsDraft.enabled
+                          ? 'bg-emerald-500 hover:bg-emerald-400 text-[#071A12] border-emerald-200'
+                          : 'bg-red-600 hover:bg-red-500 text-white border-red-300'
                       }`}
                     >
-                      {name}
-                      <span
-                        className={`block text-[10px] font-bold ${
-                          isOff ? 'text-red-100' : 'text-emerald-700'
+                      <i
+                        className={`fa-solid ${
+                          hsDraft.enabled ? 'fa-toggle-on text-base' : 'fa-toggle-off text-base'
                         }`}
-                      >
-                        {isOff ? 'LIBUR' : 'Buka'}
-                      </span>
+                      ></i>
+                      <span>{hsDraft.enabled ? 'Aktif' : 'Nonaktif'}</span>
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
+                </div>
 
-            {/* 2. Liburkan Tanggal Tertentu (Cuti / Acara) */}
-            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
-              <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
-                <i className="fa-solid fa-ban text-amber-600"></i>
-                <span>2. Liburkan Tanggal Tertentu</span>
-              </h3>
-              <div className="flex gap-2">
-                <input
-                  type="date"
-                  value={customDateInput}
-                  onChange={(e) => setCustomDateInput(e.target.value)}
-                  min={todayIso}
-                  className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddCustomDate}
-                  className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black px-3.5 py-2 rounded-xl text-xs whitespace-nowrap flex-shrink-0"
-                >
-                  + Liburkan
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {closedSpecificDates.length > 0 ? (
-                  closedSpecificDates.map((dt) => (
-                    <span
-                      key={dt}
-                      className="inline-flex items-center gap-1.5 bg-red-100 text-red-900 border border-red-300 text-xs font-black px-2.5 py-1 rounded-lg"
-                    >
-                      Libur: {dt}
-                      <button
-                        type="button"
-                        onClick={() => onRemoveSpecificHoliday(dt)}
-                        aria-label={`Buka kembali ${dt}`}
-                        className="text-red-700 font-black hover:text-red-900"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-stone-400">Belum ada tanggal libur khusus.</span>
-                )}
-              </div>
-            </div>
-
-            {/* 3. Buka / Tutup Jam Operasional Tertentu */}
-            <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
-              <div>
-                <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
-                  <i className="fa-regular fa-clock text-emerald-700"></i>
-                  <span>3. Buka / Tutup Jam Operasional</span>
-                </h3>
-              </div>
-
-              <div className="space-y-1.5">
-                {masterTimeSlots.map((slot) => (
-                  <div
-                    key={slot.time}
-                    className={`flex justify-between items-center gap-2 p-2.5 rounded-xl border transition ${
-                      slot.active
-                        ? 'bg-white border-stone-200'
-                        : 'bg-stone-100 border-stone-300 opacity-90'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={`text-sm font-black ${
-                          slot.active ? 'text-[#0B261C]' : 'text-stone-400 line-through'
-                        }`}
-                      >
-                        {slot.time} WIB
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                          slot.active
-                            ? 'bg-emerald-100 text-emerald-900'
-                            : 'bg-stone-300 text-stone-700'
-                        }`}
-                      >
-                        {slot.active ? 'Buka' : 'Tutup'}
-                      </span>
+                {/* 2. Daftar Hari (Senin s/d Minggu) + Toggle Buka/Tutup & Jam Buka - Jam Tutup per Hari */}
+                <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap border-b border-stone-100 pb-2.5">
+                    <div>
+                      <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
+                        <i className="fa-solid fa-calendar-check text-emerald-700"></i>
+                        <span>Hari &amp; Jam Operasional Home Service (Senin – Minggu)</span>
+                      </h3>
+                      <p className="text-[11px] text-stone-500 mt-0.5">
+                        Atur hari buka/libur serta jam operasional layanan Home Service untuk masing-masing hari.
+                      </p>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => onToggleMasterSlot(slot.time)}
-                      className={`tactile-btn px-3 py-1.5 rounded-lg text-xs font-black transition flex-shrink-0 ${
-                        slot.active
-                          ? 'bg-red-100 text-red-800 hover:bg-red-200'
-                          : 'bg-[#0B261C] text-[#D4AF37]'
-                      }`}
+                      onClick={() => handleApplyHoursToAllDays('09:00', '20:00')}
+                      className="tactile-btn bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1"
                     >
-                      {slot.active ? 'Matikan Jam' : 'Buka Jam'}
+                      <i className="fa-regular fa-clock"></i>
+                      <span>Setel 09:00–20:00 Semua Hari</span>
                     </button>
                   </div>
-                ))}
-              </div>
 
-              {/* Tambah Jam Baru */}
-              <div className="pt-2 border-t border-stone-200 flex gap-2">
-                <input
-                  type="time"
-                  value={newSlotTimeInput}
-                  onChange={(e) => setNewSlotTimeInput(e.target.value)}
-                  className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddNewSlot}
-                  className="tactile-btn bg-emerald-800 hover:bg-emerald-900 text-white font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
-                >
-                  <i className="fa-solid fa-plus"></i> Tambah Jam
-                </button>
+                  <div className="space-y-2">
+                    {hsDraft.days.map((dayItem) => (
+                      <div
+                        key={dayItem.dayOfWeek}
+                        className={`p-3 rounded-2xl border transition ${
+                          dayItem.isOpen
+                            ? 'bg-emerald-50/40 border-emerald-200'
+                            : 'bg-stone-100 border-stone-300 opacity-85'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          {/* Nama Hari & Badge Status */}
+                          <div className="flex items-center gap-2 min-w-[120px]">
+                            <span
+                              className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                                dayItem.isOpen ? 'bg-emerald-600' : 'bg-red-500'
+                              }`}
+                            ></span>
+                            <span className="text-xs sm:text-sm font-black text-[#0B261C]">
+                              {dayItem.dayName}
+                            </span>
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                                dayItem.isOpen
+                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                  : 'bg-red-100 text-red-800 border border-red-300'
+                              }`}
+                            >
+                              {dayItem.isOpen ? 'AKTIF / BUKA' : 'TUTUP / LIBUR'}
+                            </span>
+                          </div>
+
+                          {/* Toggle Switch Aktif / Tutup per Hari */}
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={dayItem.isOpen}
+                            onClick={() => handleToggleHsDayOpen(dayItem.dayOfWeek)}
+                            className={`tactile-btn px-3 py-1.5 rounded-xl text-xs font-black border flex items-center gap-1.5 transition ${
+                              dayItem.isOpen
+                                ? 'bg-[#0B261C] text-[#D4AF37] border-[#D4AF37]/60'
+                                : 'bg-red-600 text-white border-red-700'
+                            }`}
+                          >
+                            <i
+                              className={`fa-solid ${
+                                dayItem.isOpen ? 'fa-toggle-on text-emerald-400' : 'fa-toggle-off'
+                              }`}
+                            ></i>
+                            <span>{dayItem.isOpen ? 'Aktif' : 'Tutup'}</span>
+                          </button>
+                        </div>
+
+                        {/* Input Jam Buka & Jam Tutup per Hari */}
+                        {dayItem.isOpen ? (
+                          <div className="mt-2.5 pt-2 border-t border-emerald-200/70 grid grid-cols-2 gap-2 items-center">
+                            <div>
+                              <label className="text-[10px] font-extrabold text-stone-600 block mb-0.5">
+                                Jam Buka ({dayItem.dayName}):
+                              </label>
+                              <input
+                                type="time"
+                                value={dayItem.openTime}
+                                onChange={(e) =>
+                                  handleChangeHsDayHours(
+                                    dayItem.dayOfWeek,
+                                    'openTime',
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 bg-white text-xs font-black text-[#0B261C]"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-extrabold text-stone-600 block mb-0.5">
+                                Jam Tutup ({dayItem.dayName}):
+                              </label>
+                              <input
+                                type="time"
+                                value={dayItem.closeTime}
+                                onChange={(e) =>
+                                  handleChangeHsDayHours(
+                                    dayItem.dayOfWeek,
+                                    'closeTime',
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full px-2.5 py-1.5 rounded-xl border border-stone-300 bg-white text-xs font-black text-[#0B261C]"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-1.5 text-[11px] font-bold text-red-700">
+                            Layanan Home Service libur pada hari {dayItem.dayName}.
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. Pengaturan Daftar Slot Jam Home Service (Pilih / Tambah / Hapus) */}
+                <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-3">
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
+                      <i className="fa-solid fa-clock text-amber-600"></i>
+                      <span>Daftar Slot Jam Home Service</span>
+                    </h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      Pilih slot jam yang aktif, tambahkan jam baru, atau hapus slot jam Home Service. Slot yang tampil ke pelanggan akan mengikuti jam buka–tutup hari terkait.
+                    </p>
+                  </div>
+
+                  {/* Grid Slot Jam Home Service */}
+                  <div className="space-y-1.5">
+                    {hsDraft.slots.map((slot) => (
+                      <div
+                        key={slot.time}
+                        className={`flex justify-between items-center gap-2 p-2.5 rounded-xl border transition ${
+                          slot.active
+                            ? 'bg-emerald-50/40 border-emerald-200'
+                            : 'bg-stone-100 border-stone-300 opacity-85'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`text-sm font-black ${
+                              slot.active ? 'text-[#0B261C]' : 'text-stone-400 line-through'
+                            }`}
+                          >
+                            {slot.time} WIB
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              slot.active
+                                ? 'bg-emerald-100 text-emerald-900'
+                                : 'bg-stone-300 text-stone-700'
+                            }`}
+                          >
+                            {slot.active ? 'Aktif' : 'Nonaktif'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHsSlotActive(slot.time)}
+                            className={`tactile-btn px-3 py-1.5 rounded-lg text-xs font-black transition ${
+                              slot.active
+                                ? 'bg-amber-100 text-amber-950 hover:bg-amber-200'
+                                : 'bg-[#0B261C] text-[#D4AF37]'
+                            }`}
+                          >
+                            {slot.active ? 'Matikan' : 'Aktifkan'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveHsSlot(slot.time)}
+                            aria-label={`Hapus slot ${slot.time}`}
+                            className="tactile-btn bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg text-xs font-black"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Form Tambah Slot Jam Home Service Baru */}
+                  <div className="pt-2 border-t border-stone-200 flex gap-2">
+                    <input
+                      type="time"
+                      value={newHsSlotInput}
+                      onChange={(e) => setNewHsSlotInput(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddHsSlot}
+                      className="tactile-btn bg-emerald-800 hover:bg-emerald-900 text-white font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                    >
+                      <i className="fa-solid fa-plus"></i>
+                      <span>Tambah Slot Jam</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Tombol Simpan Pengaturan Jadwal & Reset Default */}
+                <div className="bg-[#0B261C] p-3.5 rounded-2xl border-2 border-[#D4AF37] shadow-lg space-y-2.5">
+                  {hasUnsavedHsChanges && (
+                    <div className="bg-amber-400/20 border border-amber-300/50 text-amber-200 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1.5">
+                      <i className="fa-solid fa-circle-info text-[#D4AF37]"></i>
+                      <span>Klik tombol di bawah untuk menyimpan perubahan jam operasional.</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleSaveHomeServiceSchedule}
+                    className="tactile-btn gold-shimmer-card w-full min-h-[46px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-3 px-4 rounded-xl text-xs sm:text-sm uppercase tracking-wider border border-amber-200 shadow-md flex items-center justify-center gap-2"
+                  >
+                    <i className="fa-solid fa-floppy-disk"></i>
+                    <span>Simpan Pengaturan Jadwal</span>
+                  </button>
+
+                  <div className="flex items-center justify-between pt-1 text-[11px] text-stone-300">
+                    <span>Jadwal default: Senin–Minggu (09:00 – 20:00)</span>
+                    <button
+                      type="button"
+                      onClick={handleResetHomeServiceDefault}
+                      className="text-amber-300 hover:underline font-bold"
+                    >
+                      Reset ke Default
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* =========================================================== */}
+            {/* TAB B: PENGATURAN JADWAL STUDIO                             */}
+            {/* =========================================================== */}
+            {scheduleSectionTab === 'studio' && (
+              <div className="space-y-3 animate-page-enter">
+                {/* 1. Atur Hari Libur Rutin Mingguan */}
+                <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+                  <div className="flex justify-between items-center gap-2 flex-wrap">
+                    <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
+                      <i className="fa-solid fa-calendar-xmark text-red-600"></i>
+                      <span>1. Atur Libur Mingguan Studio</span>
+                    </h3>
+                    <span className="text-[11px] font-bold text-stone-500">Klik Hari untuk Ubah</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {dayNames.map((name, idx) => {
+                      const isOff = closedWeekdays.includes(idx);
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => onToggleWeekdayHoliday(idx)}
+                          className={`tactile-btn py-2 px-1.5 rounded-xl border text-xs font-black transition truncate ${
+                            isOff
+                              ? 'bg-red-600 text-white border-red-700 shadow-xs'
+                              : 'bg-emerald-50 text-emerald-950 border-emerald-200 hover:border-emerald-400'
+                          }`}
+                        >
+                          {name}
+                          <span
+                            className={`block text-[10px] font-bold ${
+                              isOff ? 'text-red-100' : 'text-emerald-700'
+                            }`}
+                          >
+                            {isOff ? 'LIBUR' : 'Buka'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Liburkan Tanggal Tertentu (Cuti / Acara) */}
+                <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+                  <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
+                    <i className="fa-solid fa-ban text-amber-600"></i>
+                    <span>2. Liburkan Tanggal Tertentu</span>
+                  </h3>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={customDateInput}
+                      onChange={(e) => setCustomDateInput(e.target.value)}
+                      min={todayIso}
+                      className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomDate}
+                      className="tactile-btn bg-[#0B261C] text-[#D4AF37] font-black px-3.5 py-2 rounded-xl text-xs whitespace-nowrap flex-shrink-0"
+                    >
+                      + Liburkan
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {closedSpecificDates.length > 0 ? (
+                      closedSpecificDates.map((dt) => (
+                        <span
+                          key={dt}
+                          className="inline-flex items-center gap-1.5 bg-red-100 text-red-900 border border-red-300 text-xs font-black px-2.5 py-1 rounded-lg"
+                        >
+                          Libur: {dt}
+                          <button
+                            type="button"
+                            onClick={() => onRemoveSpecificHoliday(dt)}
+                            aria-label={`Buka kembali ${dt}`}
+                            className="text-red-700 font-black hover:text-red-900"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-stone-400">Belum ada tanggal libur khusus.</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Buka / Tutup Jam Operasional Tertentu */}
+                <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-xs space-y-2.5">
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-black text-[#0B261C] uppercase flex items-center gap-1.5">
+                      <i className="fa-regular fa-clock text-emerald-700"></i>
+                      <span>3. Buka / Tutup Jam Operasional Studio</span>
+                    </h3>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {masterTimeSlots.map((slot) => (
+                      <div
+                        key={slot.time}
+                        className={`flex justify-between items-center gap-2 p-2.5 rounded-xl border transition ${
+                          slot.active
+                            ? 'bg-white border-stone-200'
+                            : 'bg-stone-100 border-stone-300 opacity-90'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`text-sm font-black ${
+                              slot.active ? 'text-[#0B261C]' : 'text-stone-400 line-through'
+                            }`}
+                          >
+                            {slot.time} WIB
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              slot.active
+                                ? 'bg-emerald-100 text-emerald-900'
+                                : 'bg-stone-300 text-stone-700'
+                            }`}
+                          >
+                            {slot.active ? 'Buka' : 'Tutup'}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => onToggleMasterSlot(slot.time)}
+                          className={`tactile-btn px-3 py-1.5 rounded-lg text-xs font-black transition flex-shrink-0 ${
+                            slot.active
+                              ? 'bg-red-100 text-red-800 hover:bg-red-200'
+                              : 'bg-[#0B261C] text-[#D4AF37]'
+                          }`}
+                        >
+                          {slot.active ? 'Matikan Jam' : 'Buka Jam'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Tambah Jam Baru */}
+                  <div className="pt-2 border-t border-stone-200 flex gap-2">
+                    <input
+                      type="time"
+                      value={newSlotTimeInput}
+                      onChange={(e) => setNewSlotTimeInput(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-stone-300 rounded-xl text-xs font-bold text-stone-900 bg-white min-w-0"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddNewSlot}
+                      className="tactile-btn bg-emerald-800 hover:bg-emerald-900 text-white font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1 whitespace-nowrap flex-shrink-0"
+                    >
+                      <i className="fa-solid fa-plus"></i> Tambah Jam
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

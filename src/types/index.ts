@@ -152,3 +152,19 @@ export interface TimeSlot {
   time: string;
   active: boolean;
 }
+
+export interface HomeServiceDaySchedule {
+  dayOfWeek: number; // 0 = Minggu, 1 = Senin, ..., 6 = Sabtu
+  dayName: string;
+  isOpen: boolean;
+  openTime: string; // HH:mm e.g. "09:00"
+  closeTime: string; // HH:mm e.g. "20:00"
+}
+
+export interface HomeServiceScheduleConfig {
+  enabled: boolean;
+  days: HomeServiceDaySchedule[];
+  slots: TimeSlot[];
+  updatedAt?: string;
+}
+

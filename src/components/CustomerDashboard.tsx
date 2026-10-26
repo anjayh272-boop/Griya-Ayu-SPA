@@ -10,6 +10,7 @@ import {
   ServiceGridCategory,
   PointReward,
   ServiceItem,
+  HomeServiceScheduleConfig,
 } from '../types/index.ts';
 import {
   calculateOrderPricing,
@@ -29,6 +30,9 @@ import {
   compressImageFileToDataUrl,
   buildCustomerBookingWaToAdminMessage,
   buildCustomerToAdminRefundWaMessage,
+  normalizeHomeServiceSchedule,
+  isHomeServiceDateAvailable,
+  getActiveHomeServiceSlotsForDate,
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_QRIS_MERCHANT,
@@ -43,6 +47,7 @@ import {
   PACKAGE_CATALOG,
   ANATOMY_LOCATIONS,
   POINT_REWARDS,
+  DEFAULT_HOME_SERVICE_SCHEDULE,
 } from '../data/mockData.ts';
 import { AccountPanel } from './AccountPanel.tsx';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
@@ -57,6 +62,7 @@ interface CustomerDashboardProps {
   packageServices?: ServiceItem[];
   closedWeekdays: number[];
   closedSpecificDates: string[];
+  homeServiceSchedule?: HomeServiceScheduleConfig;
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
@@ -111,6 +117,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   packageServices,
   closedWeekdays,
   closedSpecificDates,
+  homeServiceSchedule,
   language,
   onChangeLanguage,
   onUpdateUser,
@@ -369,6 +376,28 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const todayIso = getTodayIso(nowMs);
   const currentTimeHm = getCurrentTimeHm(nowMs);
 
+  const activeHomeServiceSchedule = React.useMemo(
+    () => normalizeHomeServiceSchedule(homeServiceSchedule || DEFAULT_HOME_SERVICE_SCHEDULE),
+    [homeServiceSchedule]
+  );
+
+  // Status ketersediaan Home Service pada tanggal yang sedang dipilih pelanggan
+  const selectedDateHomeServiceStatus = React.useMemo(
+    () =>
+      isHomeServiceDateAvailable(
+        selectedDateIso,
+        activeHomeServiceSchedule,
+        closedSpecificDates
+      ),
+    [selectedDateIso, activeHomeServiceSchedule, closedSpecificDates]
+  );
+
+  // Daftar slot jam Home Service yang aktif untuk tanggal terpilih
+  const activeHomeServiceSlotsForSelectedDate = React.useMemo(
+    () => getActiveHomeServiceSlotsForDate(selectedDateIso, activeHomeServiceSchedule),
+    [selectedDateIso, activeHomeServiceSchedule]
+  );
+
   // Generate kalender: menampilkan 2 hari sebelumnya (misal tgl 18 & 19 yang otomatis abu-abu/terlewat) + hari ini (tgl 20) + 29 hari ke depan
   const calendarDays = React.useMemo(() => {
     const days: Array<{
@@ -378,6 +407,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       dayNum: number;
       monthName: string;
       isHoliday: boolean;
+      isStudioHoliday: boolean;
+      isHomeServiceClosed: boolean;
       isPast: boolean;
       isToday: boolean;
     }> = [];
@@ -409,7 +440,14 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       const iso = `${yyyy}-${mm}-${dd}`;
       const dayIdx = d.getDay();
       const pretty = `${dayLabels[dayIdx]}, ${d.getDate()} ${monthLabels[d.getMonth()]} ${yyyy}`;
-      const holiday = isDateHoliday(iso, dayIdx, closedWeekdays, closedSpecificDates);
+      const studioHoliday = isDateHoliday(iso, dayIdx, closedWeekdays, closedSpecificDates);
+      const hsAvailability = isHomeServiceDateAvailable(
+        iso,
+        activeHomeServiceSchedule,
+        closedSpecificDates
+      );
+      const homeServiceClosed = !hsAvailability.available;
+      const holiday = visitType === 'home_service' ? homeServiceClosed : studioHoliday;
       const past = iso < todayIso;
 
       days.push({
@@ -419,14 +457,23 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         dayNum: d.getDate(),
         monthName: monthLabels[d.getMonth()],
         isHoliday: holiday,
+        isStudioHoliday: studioHoliday,
+        isHomeServiceClosed: homeServiceClosed,
         isPast: past,
         isToday: iso === todayIso,
       });
     }
     return days;
-  }, [closedWeekdays, closedSpecificDates, todayIso]);
+  }, [
+    closedWeekdays,
+    closedSpecificDates,
+    activeHomeServiceSchedule,
+    visitType,
+    todayIso,
+    nowMs,
+  ]);
 
-  // Otomatis koreksi jika tanggal terpilih sudah lewat atau hari libur, serta reset jam jika sudah terlewat
+  // Otomatis koreksi jika tanggal terpilih sudah lewat, serta reset jam jika sudah terlewat atau tidak tersedia pada mode Home Service
   useEffect(() => {
     if (isDatePast(selectedDateIso, nowMs)) {
       const firstOpen = calendarDays.find((d) => !d.isPast && !d.isHoliday);
@@ -443,8 +490,31 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
     if (selectedTimeSlot && isTimeSlotPast(selectedDateIso, selectedTimeSlot, nowMs)) {
       setSelectedTimeSlot(null);
+      return;
     }
-  }, [nowMs, todayIso, selectedDateIso, selectedTimeSlot, calendarDays]);
+
+    if (visitType === 'home_service') {
+      if (!selectedDateHomeServiceStatus.available) {
+        if (selectedTimeSlot) setSelectedTimeSlot(null);
+        return;
+      }
+      if (
+        selectedTimeSlot &&
+        !activeHomeServiceSlotsForSelectedDate.some((s) => s.time === selectedTimeSlot)
+      ) {
+        setSelectedTimeSlot(null);
+      }
+    }
+  }, [
+    nowMs,
+    todayIso,
+    selectedDateIso,
+    selectedTimeSlot,
+    calendarDays,
+    visitType,
+    selectedDateHomeServiceStatus,
+    activeHomeServiceSlotsForSelectedDate,
+  ]);
 
   // Daftar reward poin yang dikelola Admin (hanya menampilkan yang aktif/tersedia di halaman pelanggan)
   const allManagedRewards = pointRewards && pointRewards.length > 0 ? pointRewards : POINT_REWARDS;
@@ -557,6 +627,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       );
       return;
     }
+    if (visitType === 'home_service') {
+      setSelectedDateIso(iso);
+      setSelectedDatePretty(pretty);
+      setSelectedTimeSlot(null);
+      if (isHoliday) {
+        onShowToast(
+          'Home Service Tidak Tersedia',
+          'Maaf, layanan Home Service tidak tersedia pada hari tersebut.'
+        );
+      }
+      return;
+    }
     if (isHoliday) {
       onShowToast(
         isEn ? 'Closed on Selected Date' : 'Jadwal Sedang Libur',
@@ -606,6 +688,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       onShowToast(
         'Tanggal Sudah Terlewat',
         'Tanggal yang dipilih sudah terlewat. Silakan pilih tanggal hari ini atau tanggal berikutnya.'
+      );
+      return;
+    }
+    if (visitType === 'home_service' && !selectedDateHomeServiceStatus.available) {
+      onShowToast(
+        'Home Service Tidak Tersedia',
+        'Maaf, layanan Home Service tidak tersedia pada hari tersebut.'
       );
       return;
     }
@@ -1724,115 +1813,163 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 </div>
               </div>
 
-              {/* BAGIAN B: GRID SLOT JAM OPERASIONAL */}
+              {/* BAGIAN B: GRID SLOT JAM OPERASIONAL (SINKRON DENGAN JADWAL STUDIO / HOME SERVICE) */}
               <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-stone-200/90 space-y-3">
                 <div className="flex justify-between items-center gap-2 flex-wrap">
-                  <h2 className="text-base font-black text-[#0B261C]">
-                    {isEn ? 'Select Session Time' : 'Pilih Jam Sesi'}
-                  </h2>
+                  <div>
+                    <h2 className="text-base font-black text-[#0B261C]">
+                      {visitType === 'home_service'
+                        ? isEn
+                          ? 'Select Home Service Time'
+                          : 'Pilih Jam Sesi Home Service'
+                        : isEn
+                        ? 'Select Session Time'
+                        : 'Pilih Jam Sesi'}
+                    </h2>
+                    {visitType === 'home_service' && selectedDateHomeServiceStatus.available && (
+                      <p className="text-[11px] font-bold text-amber-800 mt-0.5">
+                        🚗 Jam Operasional Hari {selectedDateHomeServiceStatus.daySchedule.dayName}:{' '}
+                        {selectedDateHomeServiceStatus.daySchedule.openTime} –{' '}
+                        {selectedDateHomeServiceStatus.daySchedule.closeTime} WIB
+                      </p>
+                    )}
+                  </div>
                   <span className="bg-emerald-50 text-emerald-950 border border-emerald-200 px-2.5 py-1 rounded-xl text-xs font-black">
                     🕒 Sekarang {currentTimeHm} WIB
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2.5">
-                  {masterTimeSlots.map((slot) => {
-                    const status = isSlotAvailable(
-                      slot.time,
-                      selectedDateIso,
-                      masterTimeSlots,
-                      bookings,
-                      nowMs
-                    );
-                    const isSelected = selectedTimeSlot === slot.time;
+                {/* Jika Pelanggan Memilih Home Service & Hari Tersebut Ditutup/Libur oleh Admin */}
+                {visitType === 'home_service' && !selectedDateHomeServiceStatus.available ? (
+                  <div className="bg-red-50 border-2 border-red-300 text-red-900 p-4 rounded-2xl space-y-2 text-center animate-fade">
+                    <div className="w-10 h-10 rounded-full bg-red-100 text-red-700 border border-red-300 flex items-center justify-center mx-auto text-base">
+                      <i className="fa-solid fa-calendar-xmark"></i>
+                    </div>
+                    <h4 className="text-xs sm:text-sm font-black text-red-900">
+                      Maaf, layanan Home Service tidak tersedia pada hari tersebut
+                    </h4>
+                    <p className="text-xs text-red-800 leading-relaxed">
+                      {selectedDateHomeServiceStatus.reason === 'service_disabled'
+                        ? 'Layanan Home Service sedang dinonaktifkan sementara oleh Admin karena seluruh terapis sedang penuh. Silakan pilih lokasi Di Studio atau pilih jadwal lain.'
+                        : `Jadwal layanan Home Service pada hari ${selectedDateHomeServiceStatus.daySchedule.dayName} (${selectedDatePretty}) sedang tutup/libur. Silakan pilih tanggal lain yang tersedia atau beralih ke lokasi Di Studio.`}
+                    </p>
+                  </div>
+                ) : visitType === 'home_service' &&
+                  activeHomeServiceSlotsForSelectedDate.length === 0 ? (
+                  <div className="bg-amber-50 border-2 border-amber-300 text-amber-950 p-4 rounded-2xl space-y-1.5 text-center animate-fade">
+                    <i className="fa-regular fa-clock text-amber-700 text-lg"></i>
+                    <p className="text-xs sm:text-sm font-black">
+                      Maaf, layanan Home Service tidak tersedia pada hari tersebut
+                    </p>
+                    <p className="text-xs text-amber-900">
+                      Tidak ada slot jam Home Service yang aktif pada rentang jam operasional hari ini. Silakan pilih tanggal lain.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {(visitType === 'home_service'
+                      ? activeHomeServiceSlotsForSelectedDate
+                      : masterTimeSlots
+                    ).map((slot) => {
+                      const status = isSlotAvailable(
+                        slot.time,
+                        selectedDateIso,
+                        visitType === 'home_service'
+                          ? activeHomeServiceSlotsForSelectedDate
+                          : masterTimeSlots,
+                        bookings,
+                        nowMs
+                      );
+                      const isSelected = selectedTimeSlot === slot.time;
 
-                    if (status.reason === 'past') {
+                      if (status.reason === 'past') {
+                        return (
+                          <button
+                            key={slot.time}
+                            type="button"
+                            disabled
+                            aria-label={`Jam ${slot.time} Sudah Terlewat`}
+                            className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
+                          >
+                            <span className="text-sm sm:text-base font-black line-through text-stone-400">
+                              {slot.time}
+                            </span>
+                            <span className="text-xs font-bold text-stone-500 mt-0.5">
+                              {isEn ? 'Passed' : 'Terlewat'}
+                            </span>
+                          </button>
+                        );
+                      }
+
+                      if (status.reason === 'booked') {
+                        return (
+                          <button
+                            key={slot.time}
+                            disabled
+                            aria-label={`Jam ${slot.time} Terkunci`}
+                            className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
+                          >
+                            <span className="text-sm sm:text-base font-black line-through">
+                              {slot.time}
+                            </span>
+                            <span className="text-xs font-bold text-stone-500 mt-0.5">
+                              {isEn ? 'Locked' : 'Penuh'}
+                            </span>
+                          </button>
+                        );
+                      }
+
+                      if (status.reason === 'closed') {
+                        return (
+                          <button
+                            key={slot.time}
+                            type="button"
+                            onClick={() =>
+                              onShowToast(
+                                'Jam Sedang Tutup',
+                                `Jam ${slot.time} sedang ditutup sementara oleh Admin. Silakan pilih jam lain yang tersedia.`
+                              )
+                            }
+                            className="py-3 px-2 rounded-2xl striped-disabled text-stone-500 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center"
+                          >
+                            <span className="text-sm sm:text-base font-bold">{slot.time}</span>
+                            <span className="text-xs font-bold bg-stone-300 text-stone-700 px-1.5 rounded mt-0.5">
+                              {isEn ? 'Closed' : 'Tutup'}
+                            </span>
+                          </button>
+                        );
+                      }
+
                       return (
                         <button
                           key={slot.time}
                           type="button"
-                          disabled
-                          aria-label={`Jam ${slot.time} Sudah Terlewat`}
-                          className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
-                        >
-                          <span className="text-sm sm:text-base font-black line-through text-stone-400">
-                            {slot.time}
-                          </span>
-                          <span className="text-xs font-bold text-stone-500 mt-0.5">
-                            {isEn ? 'Passed' : 'Terlewat'}
-                          </span>
-                        </button>
-                      );
-                    }
-
-                    if (status.reason === 'booked') {
-                      return (
-                        <button
-                          key={slot.time}
-                          disabled
-                          aria-label={`Jam ${slot.time} Terkunci`}
-                          className="py-3 px-2 rounded-2xl bg-stone-200 text-stone-400 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center opacity-85"
-                        >
-                          <span className="text-sm sm:text-base font-black line-through">
-                            {slot.time}
-                          </span>
-                          <span className="text-xs font-bold text-stone-500 mt-0.5">
-                            {isEn ? 'Locked' : 'Penuh'}
-                          </span>
-                        </button>
-                      );
-                    }
-
-                    if (status.reason === 'closed') {
-                      return (
-                        <button
-                          key={slot.time}
-                          type="button"
-                          onClick={() =>
-                            onShowToast(
-                              'Jam Sedang Tutup',
-                              `Jam ${slot.time} sedang ditutup sementara oleh Admin. Silakan pilih jam lain yang tersedia.`
-                            )
-                          }
-                          className="py-3 px-2 rounded-2xl striped-disabled text-stone-500 border border-stone-300 cursor-not-allowed flex flex-col items-center justify-center"
-                        >
-                          <span className="text-sm sm:text-base font-bold">{slot.time}</span>
-                          <span className="text-xs font-bold bg-stone-300 text-stone-700 px-1.5 rounded mt-0.5">
-                            {isEn ? 'Closed' : 'Tutup'}
-                          </span>
-                        </button>
-                      );
-                    }
-
-                    return (
-                      <button
-                        key={slot.time}
-                        type="button"
-                        onClick={() => setSelectedTimeSlot(slot.time)}
-                        className={`tactile-btn py-3 px-2 rounded-2xl border-2 transition flex flex-col items-center justify-center ${
-                          isSelected
-                            ? 'bg-[#0B261C] text-white border-[#D4AF37] shadow-sm'
-                            : 'bg-white text-[#0B261C] border-emerald-700/40 hover:border-emerald-800'
-                        }`}
-                      >
-                        <span className="text-sm sm:text-base font-black">{slot.time}</span>
-                        <span
-                          className={`text-xs font-extrabold mt-0.5 ${
-                            isSelected ? 'text-[#D4AF37]' : 'text-emerald-700'
+                          onClick={() => setSelectedTimeSlot(slot.time)}
+                          className={`tactile-btn py-3 px-2 rounded-2xl border-2 transition flex flex-col items-center justify-center ${
+                            isSelected
+                              ? 'bg-[#0B261C] text-white border-[#D4AF37] shadow-sm'
+                              : 'bg-white text-[#0B261C] border-emerald-700/40 hover:border-emerald-800'
                           }`}
                         >
-                          {isSelected
-                            ? isEn
-                              ? '✓ Selected'
-                              : '✓ Dipilih'
-                            : isEn
-                            ? 'Available'
-                            : 'Tersedia'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                          <span className="text-sm sm:text-base font-black">{slot.time}</span>
+                          <span
+                            className={`text-xs font-extrabold mt-0.5 ${
+                              isSelected ? 'text-[#D4AF37]' : 'text-emerald-700'
+                            }`}
+                          >
+                            {isSelected
+                              ? isEn
+                                ? '✓ Selected'
+                                : '✓ Dipilih'
+                              : isEn
+                              ? 'Available'
+                              : 'Tersedia'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Tombol Navigasi Bawah Langkah 2 (Sticky Saat Jam Sesi Dipilih) */}
                 <div

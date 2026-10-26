@@ -5,6 +5,7 @@ import type {
   TimeSlot,
   User,
   AppNotification,
+  HomeServiceScheduleConfig,
 } from '../types/index.ts';
 
 export const SINGLE_CATALOG: ServiceItem[] = [
@@ -325,6 +326,27 @@ export const INITIAL_TIME_SLOTS: TimeSlot[] = [
   { time: '17:00', active: true },
   { time: '19:00', active: true },
 ];
+
+export const DEFAULT_HOME_SERVICE_SCHEDULE: HomeServiceScheduleConfig = {
+  enabled: true,
+  days: [
+    { dayOfWeek: 1, dayName: 'Senin', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+    { dayOfWeek: 2, dayName: 'Selasa', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+    { dayOfWeek: 3, dayName: 'Rabu', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+    { dayOfWeek: 4, dayName: 'Kamis', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+    { dayOfWeek: 5, dayName: 'Jumat', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+    { dayOfWeek: 6, dayName: 'Sabtu', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+    { dayOfWeek: 0, dayName: 'Minggu', isOpen: true, openTime: '09:00', closeTime: '20:00' },
+  ],
+  slots: [
+    { time: '09:00', active: true },
+    { time: '11:00', active: true },
+    { time: '13:00', active: true },
+    { time: '15:00', active: true },
+    { time: '17:00', active: true },
+    { time: '19:00', active: true },
+  ],
+};
 
 export const INITIAL_USERS: User[] = [];
 

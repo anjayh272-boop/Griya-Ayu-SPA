@@ -5,7 +5,10 @@ import type {
   TimeSlot,
   User,
   PaymentMethodType,
+  HomeServiceDaySchedule,
+  HomeServiceScheduleConfig,
 } from '../types/index.ts';
+import { DEFAULT_HOME_SERVICE_SCHEDULE } from '../data/mockData.ts';
 
 export function formatRupiah(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -599,6 +602,168 @@ export function isSlotAvailable(
   return { available: true, reason: 'available' };
 }
 
+const DEFAULT_DAY_NAMES_MAP: Record<number, string> = {
+  1: 'Senin',
+  2: 'Selasa',
+  3: 'Rabu',
+  4: 'Kamis',
+  5: 'Jumat',
+  6: 'Sabtu',
+  0: 'Minggu',
+};
+
+const MONDAY_TO_SUNDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+/**
+ * Menormalkan data jadwal Home Service agar selalu memiliki konfigurasi lengkap Senin s/d Minggu
+ * dan daftar slot jam default jika data belum ada.
+ */
+export function normalizeHomeServiceSchedule(
+  raw?: Partial<HomeServiceScheduleConfig> | null
+): HomeServiceScheduleConfig {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      ...DEFAULT_HOME_SERVICE_SCHEDULE,
+      days: DEFAULT_HOME_SERVICE_SCHEDULE.days.map((d) => ({ ...d })),
+      slots: DEFAULT_HOME_SERVICE_SCHEDULE.slots.map((s) => ({ ...s })),
+    };
+  }
+
+  const enabled = typeof raw.enabled === 'boolean' ? raw.enabled : true;
+
+  const rawDays = Array.isArray(raw.days) ? raw.days : [];
+  const days: HomeServiceDaySchedule[] = MONDAY_TO_SUNDAY_ORDER.map((dayIdx) => {
+    const found = rawDays.find((d) => d && Number(d.dayOfWeek) === dayIdx);
+    return {
+      dayOfWeek: dayIdx,
+      dayName: found?.dayName || DEFAULT_DAY_NAMES_MAP[dayIdx] || 'Hari',
+      isOpen: typeof found?.isOpen === 'boolean' ? found.isOpen : true,
+      openTime:
+        typeof found?.openTime === 'string' && /^\d{2}:\d{2}$/.test(found.openTime)
+          ? found.openTime
+          : '09:00',
+      closeTime:
+        typeof found?.closeTime === 'string' && /^\d{2}:\d{2}$/.test(found.closeTime)
+          ? found.closeTime
+          : '20:00',
+    };
+  });
+
+  const rawSlots =
+    Array.isArray(raw.slots) && raw.slots.length > 0
+      ? raw.slots
+      : DEFAULT_HOME_SERVICE_SCHEDULE.slots;
+
+  const slots: TimeSlot[] = rawSlots
+    .filter((s) => s && typeof s.time === 'string' && /^\d{2}:\d{2}$/.test(s.time))
+    .map((s) => ({
+      time: s.time,
+      active: Boolean(s.active),
+    }))
+    .sort((a, b) => a.time.localeCompare(b.time));
+
+  return {
+    enabled,
+    days,
+    slots:
+      slots.length > 0
+        ? slots
+        : DEFAULT_HOME_SERVICE_SCHEDULE.slots.map((s) => ({ ...s })),
+    updatedAt: raw.updatedAt,
+  };
+}
+
+/**
+ * Mengambil jadwal operasional Home Service untuk tanggal tertentu (YYYY-MM-DD).
+ */
+export function getHomeServiceDaySchedule(
+  dateIso: string,
+  schedule?: HomeServiceScheduleConfig | null
+): HomeServiceDaySchedule {
+  const normalized = normalizeHomeServiceSchedule(schedule);
+  const [yyyy, mm, dd] = (dateIso || '').split('-').map(Number);
+  const d =
+    yyyy && mm && dd ? new Date(yyyy, mm - 1, dd) : new Date();
+  const dayOfWeek = d.getDay();
+  return (
+    normalized.days.find((item) => item.dayOfWeek === dayOfWeek) || {
+      dayOfWeek,
+      dayName: DEFAULT_DAY_NAMES_MAP[dayOfWeek] || 'Hari',
+      isOpen: true,
+      openTime: '09:00',
+      closeTime: '20:00',
+    }
+  );
+}
+
+/**
+ * Mengecek ketersediaan layanan Home Service pada tanggal tertentu (YYYY-MM-DD).
+ */
+export function isHomeServiceDateAvailable(
+  dateIso: string,
+  schedule?: HomeServiceScheduleConfig | null,
+  closedSpecificDates: string[] = []
+): {
+  available: boolean;
+  reason: 'available' | 'service_disabled' | 'day_closed' | 'specific_holiday';
+  daySchedule: HomeServiceDaySchedule;
+} {
+  const normalized = normalizeHomeServiceSchedule(schedule);
+  const daySchedule = getHomeServiceDaySchedule(dateIso, normalized);
+
+  if (!normalized.enabled) {
+    return {
+      available: false,
+      reason: 'service_disabled',
+      daySchedule,
+    };
+  }
+
+  if (closedSpecificDates.includes(dateIso)) {
+    return {
+      available: false,
+      reason: 'specific_holiday',
+      daySchedule,
+    };
+  }
+
+  if (!daySchedule.isOpen) {
+    return {
+      available: false,
+      reason: 'day_closed',
+      daySchedule,
+    };
+  }
+
+  return {
+    available: true,
+    reason: 'available',
+    daySchedule,
+  };
+}
+
+/**
+ * Mengambil daftar slot jam Home Service yang aktif dan berada dalam jam operasional (openTime s/d closeTime)
+ * pada tanggal yang dipilih pelanggan.
+ */
+export function getActiveHomeServiceSlotsForDate(
+  dateIso: string,
+  schedule?: HomeServiceScheduleConfig | null
+): TimeSlot[] {
+  const normalized = normalizeHomeServiceSchedule(schedule);
+  const daySchedule = getHomeServiceDaySchedule(dateIso, normalized);
+  if (!normalized.enabled || !daySchedule.isOpen) {
+    return [];
+  }
+
+  return normalized.slots.filter(
+    (s) =>
+      s.active &&
+      s.time >= daySchedule.openTime &&
+      s.time <= daySchedule.closeTime
+  );
+}
+
 /**
  * Mengecek apakah pesanan masih memenuhi batas waktu minimal 1 jam (>= 60 menit) sebelum jadwal SPA dimulai.
  */
@@ -820,6 +985,7 @@ export const STORAGE_KEYS = {
   PACKAGE_SERVICES: 'griya_ayu_package_services_live',
   CLOSED_WEEKDAYS: 'griya_ayu_closed_weekdays_live',
   CLOSED_DATES: 'griya_ayu_closed_dates_live',
+  HOME_SERVICE_SCHEDULE: 'griya_ayu_home_service_schedule_live',
   ADMIN_PROFILE: 'griya_ayu_admin_profile',
   CUSTOMER_SESSION: 'griya_customer_session',
   ACTIVE_SESSION: 'griya_customer_session',

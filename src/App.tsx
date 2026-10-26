@@ -14,6 +14,7 @@ import {
   RefundRequestInfo,
   PointReward,
   ServiceItem,
+  HomeServiceScheduleConfig,
 } from './types/index.ts';
 import {
   INITIAL_USERS,
@@ -23,6 +24,7 @@ import {
   POINT_REWARDS,
   SINGLE_CATALOG,
   PACKAGE_CATALOG,
+  DEFAULT_HOME_SERVICE_SCHEDULE,
 } from './data/mockData.ts';
 import {
   applyPointsCompletion,
@@ -53,6 +55,7 @@ import {
   sendCancellationOrRefundWhatsApp,
   sendRescheduleBookingWhatsApp,
   checkBookingRescheduleEligibility,
+  normalizeHomeServiceSchedule,
 } from './utils/spaLogic.ts';
 import {
   subscribeToGlobalCloudState,
@@ -142,6 +145,14 @@ export default function App() {
   );
   const [closedSpecificDates, setClosedSpecificDates] = useState<string[]>(() =>
     safeLoadJson<string[]>(STORAGE_KEYS.CLOSED_DATES, [])
+  );
+  const [homeServiceSchedule, setHomeServiceSchedule] = useState<HomeServiceScheduleConfig>(() =>
+    normalizeHomeServiceSchedule(
+      safeLoadJson<HomeServiceScheduleConfig | null>(
+        STORAGE_KEYS.HOME_SERVICE_SCHEDULE,
+        DEFAULT_HOME_SERVICE_SCHEDULE
+      )
+    )
   );
 
   const [adminProfile, setAdminProfile] = useState<User | null>(() => {
@@ -518,6 +529,11 @@ export default function App() {
             void syncSpaSettingsToCloud({ adminProfile: normalizedAdmin });
           }
         }
+        if (settings.homeServiceSchedule) {
+          const normalizedSchedule = normalizeHomeServiceSchedule(settings.homeServiceSchedule);
+          setHomeServiceSchedule(normalizedSchedule);
+          safeSaveJson(STORAGE_KEYS.HOME_SERVICE_SCHEDULE, normalizedSchedule);
+        }
       },
     });
 
@@ -569,6 +585,10 @@ export default function App() {
   useEffect(() => {
     safeSaveJson(STORAGE_KEYS.CLOSED_DATES, closedSpecificDates);
   }, [closedSpecificDates]);
+
+  useEffect(() => {
+    safeSaveJson(STORAGE_KEYS.HOME_SERVICE_SCHEDULE, homeServiceSchedule);
+  }, [homeServiceSchedule]);
 
   useEffect(() => {
     if (currentUser && activeScreen === 'app') {
@@ -1946,6 +1966,14 @@ export default function App() {
     });
   };
 
+  // Kelola Jadwal Operasional Home Service oleh Admin (Real-time sync ke Firestore & localStorage)
+  const handleUpdateHomeServiceSchedule = (nextSchedule: HomeServiceScheduleConfig) => {
+    const normalized = normalizeHomeServiceSchedule(nextSchedule);
+    setHomeServiceSchedule(normalized);
+    safeSaveJson(STORAGE_KEYS.HOME_SERVICE_SCHEDULE, normalized);
+    void syncSpaSettingsToCloud({ homeServiceSchedule: normalized });
+  };
+
   // Penukaran Poin Langsung oleh Pelanggan di Halaman Poin
   const handleRedeemPointReward = (reward: PointReward) => {
     if (!currentUser) return;
@@ -2117,6 +2145,7 @@ export default function App() {
             packageServices={packageServices}
             closedWeekdays={closedWeekdays}
             closedSpecificDates={closedSpecificDates}
+            homeServiceSchedule={homeServiceSchedule}
             language={language}
             onChangeLanguage={setLanguage}
             onUpdateUser={handleUpdateUser}
@@ -2148,6 +2177,8 @@ export default function App() {
             packageServices={packageServices}
             closedWeekdays={closedWeekdays}
             closedSpecificDates={closedSpecificDates}
+            homeServiceSchedule={homeServiceSchedule}
+            onUpdateHomeServiceSchedule={handleUpdateHomeServiceSchedule}
             language={language}
             onChangeLanguage={setLanguage}
             onUpdateUser={handleUpdateUser}
