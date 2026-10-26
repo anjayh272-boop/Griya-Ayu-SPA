@@ -6,7 +6,7 @@ import { createServer as createViteServer } from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VPS_WA_GATEWAY_URL = 'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message';
+const VPS_WA_GATEWAY_URL = 'https://sauce-pichunter-pop-enlarge.trycloudflare.com/api/send-message';
 const FONNTE_FALLBACK_TOKEN = 'f3iKmRXKoigZnWbLRGX4';
 
 async function startServer() {
@@ -91,6 +91,7 @@ async function startServer() {
   };
 
   // Endpoint proxy untuk kirim OTP & notifikasi WhatsApp ke VPS Gateway
+  app.post('/wa-api/api/send-message', handleWhatsAppProxy);
   app.post('/api/vps/send-message', handleWhatsAppProxy);
   app.post('/api/send-otp', handleWhatsAppProxy);
   app.post('/api/send-message', handleWhatsAppProxy);

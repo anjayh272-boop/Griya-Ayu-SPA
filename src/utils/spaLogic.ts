@@ -855,8 +855,8 @@ export function saveFonnteToken(token: string): string {
 export const GRIYA_AYU_DEFAULT_THERAPIST = 'Rismawati, AIFMO-P (Terapis Utama Griya Ayu)';
 
 /**
- * Mengirim pesan WhatsApp melalui endpoint HTTPS Cloudflare Tunnel WhatsApp Gateway
- * (https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message).
+ * Mengirim pesan WhatsApp melalui endpoint proxy Vercel Rewrite
+ * (/wa-api/api/send-message).
  */
 export async function sendWhatsAppViaVpsGateway(
   targetPhone: string,
@@ -871,7 +871,7 @@ export async function sendWhatsAppViaVpsGateway(
   }
 
   try {
-    const response = await fetch('https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message', {
+    const response = await fetch('/wa-api/api/send-message', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -984,7 +984,7 @@ Mohon hadir 10 menit sebelum jadwal. Jika ada pertanyaan atau perubahan jadwal, 
 
   try {
     const response = await fetch(
-      'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message',
+      '/wa-api/api/send-message',
       {
         method: 'POST',
         headers: {
@@ -1002,7 +1002,7 @@ Mohon hadir 10 menit sebelum jadwal. Jika ada pertanyaan atau perubahan jadwal, 
     // Kirim notifikasi ringkas ke nomor WhatsApp Admin Griya Ayu
     if (adminTarget && adminTarget !== customerTarget) {
       void fetch(
-        'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message',
+        '/wa-api/api/send-message',
         {
           method: 'POST',
           headers: {
@@ -1089,7 +1089,7 @@ Jika ada kendala terkait pengembalian dana, silakan hubungi admin kami dengan me
 
   try {
     const response = await fetch(
-      'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message',
+      '/wa-api/api/send-message',
       {
         method: 'POST',
         headers: {
@@ -1107,7 +1107,7 @@ Jika ada kendala terkait pengembalian dana, silakan hubungi admin kami dengan me
     // Kirim salinan ringkas informasi pembatalan ke nomor WA Admin
     if (adminTarget && adminTarget !== customerTarget) {
       void fetch(
-        'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message',
+        '/wa-api/api/send-message',
         {
           method: 'POST',
           headers: {
@@ -1177,7 +1177,7 @@ Sampai jumpa di lokasi!`;
 
   try {
     const response = await fetch(
-      'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message',
+      '/wa-api/api/send-message',
       {
         method: 'POST',
         headers: {
@@ -1195,7 +1195,7 @@ Sampai jumpa di lokasi!`;
     // Kirim salinan ringkas informasi reschedule ke WA Admin
     if (adminTarget && adminTarget !== customerTarget) {
       void fetch(
-        'https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message',
+        '/wa-api/api/send-message',
         {
           method: 'POST',
           headers: {

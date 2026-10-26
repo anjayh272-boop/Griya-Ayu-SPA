@@ -100,8 +100,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsSendingOtp(true);
 
     try {
-      // 3. Panggil endpoint HTTPS Cloudflare Tunnel WhatsApp Gateway
-      const response = await fetch('https://innovation-eve-momentum-mixer.trycloudflare.com/api/send-message', {
+      // 3. Panggil endpoint proxy Vercel Rewrite (/wa-api/api/send-message)
+      const response = await fetch('/wa-api/api/send-message', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

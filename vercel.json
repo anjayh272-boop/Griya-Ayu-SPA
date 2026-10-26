@@ -1,8 +1,8 @@
 {
   "rewrites": [
     {
-      "source": "/api/vps/:path*",
-      "destination": "https://innovation-eve-momentum-mixer.trycloudflare.com/api/:path*"
+      "source": "/wa-api/:path*",
+      "destination": "https://sauce-pichunter-pop-enlarge.trycloudflare.com/:path*"
     }
   ]
 }
