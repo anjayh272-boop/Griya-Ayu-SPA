@@ -2142,47 +2142,12 @@ export default function App() {
           confettiActive={celebration.confettiActive}
         />
 
-        {/* BANNER INSTALASI PWA KE LAYAR UTAMA HP */}
-        <PWAInstallBanner />
-
-        {/* DIALOG / BANNER HALUS IZIN NOTIFIKASI SISTEM HP (RINGKAS) */}
-        {notifPermission !== 'granted' && showNotifPrompt && (
-          <div className="mx-3 mt-1.5 mb-0.5 rounded-xl bg-gradient-to-r from-[#0B261C] via-[#113829] to-[#0B261C] border border-[#D4AF37]/50 px-2.5 py-2 shadow-sm text-white relative overflow-hidden">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <div className="w-7 h-7 rounded-lg bg-[#D4AF37]/20 border border-[#D4AF37]/50 flex items-center justify-center shrink-0 text-[#D4AF37]">
-                  <i className="fa-solid fa-bell text-xs animate-bounce"></i>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-black text-[#D4AF37] truncate leading-tight">
-                    Notifikasi Booking HP
-                  </p>
-                  <p className="text-[10px] text-stone-200 truncate leading-tight">
-                    Aktifkan pemberitahuan booking baru di layar HP
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleRequestNotificationPermission}
-                  className="tactile-btn py-1.5 px-2.5 rounded-lg bg-gradient-to-r from-[#D4AF37] to-[#b89323] text-[#0B261C] font-black text-[11px] shadow-xs whitespace-nowrap"
-                >
-                  Aktifkan
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowNotifPrompt(false)}
-                  aria-label="Tutup dialog notifikasi"
-                  className="text-stone-300 hover:text-white text-xs px-1.5 py-1 rounded-lg"
-                >
-                  <i className="fa-solid fa-xmark"></i>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* BANNER ATAS RINGKAS (GABUNGAN INSTALASI PWA & NOTIFIKASI HP - 1 BARIS ROTASI/PRIORITAS) */}
+        <PWAInstallBanner
+          showNotifPrompt={notifPermission !== 'granted' && showNotifPrompt}
+          onEnableNotifications={handleRequestNotificationPermission}
+          onDismissNotifPrompt={() => setShowNotifPrompt(false)}
+        />
 
         {/* =============================================================== */}
         {/* TAMPILAN AWAL: LOGIN & DAFTAR AKUN                              */}

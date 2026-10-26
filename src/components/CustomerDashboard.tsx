@@ -900,32 +900,34 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       {/* HEADER ATAS RINGKAS & JELAS                                       */}
       {/* ================================================================= */}
       <header className="bg-gradient-to-b from-[#0B261C] via-[#0f3326] to-[#144533] text-white px-3.5 py-2.5 rounded-b-3xl shadow-md border-b border-[#D4AF37]/50">
-        <div className="flex justify-between items-center gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <GriyaAyuLogo size="sm" showBadge={false} floating={true} />
-            <div className="min-w-0 flex-1">
+        <div className="flex justify-between items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="flex items-center justify-center shrink-0">
+              <GriyaAyuLogo size="sm" showBadge={false} floating={false} />
+            </div>
+            <div className="min-w-0 flex-1 flex flex-col justify-center">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <h1 className="font-brand text-sm sm:text-base font-bold tracking-wide text-[#D4AF37] whitespace-nowrap leading-tight">
+                <h1 className="font-brand text-sm sm:text-base font-bold tracking-wide text-[#D4AF37] whitespace-nowrap leading-none">
                   GRIYA AYU
                 </h1>
                 <span className="text-[9px] leading-none bg-[#D4AF37]/20 border border-[#D4AF37]/60 text-amber-300 px-1.5 py-0.5 rounded font-black whitespace-nowrap flex-shrink-0">
                   AIFMO-P
                 </span>
               </div>
-              <p className="text-[11px] text-emerald-100/90 font-medium truncate mt-0.5">
-                <i className="fa-solid fa-location-dot text-amber-400 mr-1"></i>
-                Graha Cipta 5 Blok E7 No.3
+              <p className="text-[11px] text-emerald-100/90 font-medium truncate leading-tight mt-1 flex items-center gap-1">
+                <i className="fa-solid fa-location-dot text-amber-400 text-[10px] shrink-0"></i>
+                <span className="truncate">Graha Cipta 5 Blok E7 No.3</span>
               </p>
             </div>
           </div>
 
-          {/* Kanan Atas: Maps Cepat & Lonceng Notifikasi */}
+          {/* Kanan Atas: Maps Cepat & Lonceng Notifikasi (Proporsional & Sejajar Vertikal) */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <a
               href={GRIYA_AYU_MAPS_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="tactile-btn bg-black/30 hover:bg-black/50 border border-[#D4AF37]/50 text-amber-300 text-[11px] font-extrabold px-2.5 py-1.5 rounded-xl flex items-center gap-1 whitespace-nowrap"
+              className="tactile-btn h-9 px-3 rounded-xl bg-black/30 hover:bg-black/50 border border-[#D4AF37]/50 text-amber-300 text-[11px] font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap leading-none"
             >
               <i className="fa-solid fa-map-location-dot text-xs"></i>
               <span>Maps</span>
@@ -3929,68 +3931,115 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       {/* TAB 4: HALAMAN POIN PELANGGAN (TERHUBUNG KATALOG REWARD ADMIN)    */}
       {/* ================================================================= */}
       {customerTab === 'rewards' && (
-        <div className="p-4 space-y-4 flex-1 animate-page-enter">
-          <div className="bg-white p-4 rounded-2xl border border-stone-200/90 shadow-sm space-y-4">
-            {/* Header Saldo Poin Pelanggan */}
-            <div className="flex justify-between items-start gap-3">
-              <div>
-                <h2 className="text-base font-black text-[#0B261C] flex items-center gap-2">
-                  <i className="fa-solid fa-crown text-amber-500"></i>
+        <div className="p-3.5 space-y-3.5 flex-1 animate-page-enter">
+          {/* KARTU MEMBER DIGITAL ELEGAN (HERO LOYALTY CARD + SKEMA POIN RINGKAS) */}
+          <div className="bg-gradient-to-br from-[#0B261C] via-[#123d2d] to-[#081c14] text-white p-4 rounded-2xl border-2 border-[#D4AF37]/85 shadow-md relative overflow-hidden space-y-3">
+            {/* Baris Atas: Kiri Atas (Kartu Loyalitas Member) & Kanan Atas (Badge Saldo Poin) */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37]/60 flex items-center justify-center shrink-0 shadow-xs">
+                  <i className="fa-solid fa-crown text-[#D4AF37] text-sm"></i>
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest text-emerald-200/80 block leading-none">
+                    Griya Ayu Exclusive
+                  </span>
+                  <h2 className="text-xs sm:text-sm font-black text-[#D4AF37] truncate leading-tight mt-0.5">
+                    {isEn ? 'Member Loyalty Card' : 'Kartu Loyalitas Member'}
+                  </h2>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-[#D4AF37]/25 to-black/45 border border-[#D4AF37] px-3 py-1.5 rounded-xl shrink-0 shadow-xs flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-emerald-100 whitespace-nowrap">
+                  Saldo Poin:
+                </span>
+                <span className="text-sm sm:text-base font-black text-[#D4AF37] tabular-nums whitespace-nowrap">
+                  {currentUser.points} Poin
+                </span>
+              </div>
+            </div>
+
+            {/* Baris Tengah: Kiri Bawah (Nama & Tipe Member) & Kanan Bawah (Progress Bar Bonus Poin) */}
+            <div className="grid grid-cols-2 items-end gap-3 pt-2.5 border-t border-white/10">
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-black text-white truncate leading-tight">
+                  {currentUser.name}
+                </p>
+                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-[#D4AF37] bg-[#D4AF37]/15 border border-[#D4AF37]/40 px-2 py-0.5 rounded-md mt-1">
+                  <i className="fa-solid fa-award text-[9px]"></i>
+                  <span>{currentUser.points >= 100 ? 'Member Prioritas' : 'Member Reguler'}</span>
+                </span>
+              </div>
+
+              <div className="text-right space-y-1">
+                <div className="w-full bg-black/40 h-1.5 rounded-full overflow-hidden border border-[#D4AF37]/35 ml-auto max-w-[155px]">
+                  <div
+                    className="bg-gradient-to-r from-[#D4AF37] to-amber-200 h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(100, Math.max(15, ((currentUser.points % 50) / 50) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-emerald-100/90 font-semibold leading-tight">
+                  Tingkatkan transaksi untuk bonus poin
+                </p>
+              </div>
+            </div>
+
+            {/* Bagian Skema Perolehan Poin (Grid 2x2 / 4 Pill Compact Semi-Transparan) */}
+            <div className="bg-white/[0.07] backdrop-blur-xs rounded-xl p-2.5 border border-[#D4AF37]/30 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37] flex items-center gap-1.5">
+                  <i className="fa-solid fa-chart-line text-[10px]"></i>
+                  <span>Skema Perolehan Poin Setiap Transaksi</span>
+                </span>
+                <span className="text-[9px] font-bold text-emerald-200/80 uppercase">
+                  Otomatis
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                <div className="bg-white/10 border border-white/15 px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-1.5">
+                  <span className="text-stone-100 font-semibold truncate">Layanan Rp 100rb</span>
+                  <span className="font-black text-[#D4AF37] whitespace-nowrap">+5 Poin</span>
+                </div>
+                <div className="bg-white/10 border border-white/15 px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-1.5">
+                  <span className="text-stone-100 font-semibold truncate">Layanan Rp 150rb</span>
+                  <span className="font-black text-[#D4AF37] whitespace-nowrap">+10 Poin</span>
+                </div>
+                <div className="bg-white/10 border border-white/15 px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-1.5">
+                  <span className="text-stone-100 font-semibold truncate">Layanan Rp 250rb</span>
+                  <span className="font-black text-[#D4AF37] whitespace-nowrap">+15 Poin</span>
+                </div>
+                <div className="bg-white/10 border border-white/15 px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-1.5">
+                  <span className="text-stone-100 font-semibold truncate">Layanan Rp 400rb</span>
+                  <span className="font-black text-[#D4AF37] whitespace-nowrap">+20 Poin</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Katalog Penukaran Hadiah dengan Sub-teks Rapi Tepat di Atas Daftar */}
+          <div className="bg-white p-4 rounded-2xl border border-stone-200/90 shadow-sm space-y-3.5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-black text-[#0B261C] flex items-center gap-1.5">
+                  <i className="fa-solid fa-gift text-emerald-800"></i>
                   <span>
                     {isEn ? 'Loyalty Points & Rewards Catalog' : 'Katalog Penukaran Poin Member'}
                   </span>
-                </h2>
-                <p className="text-xs sm:text-sm text-stone-600 leading-relaxed mt-1">
-                  Kumpulkan poin dari setiap kedatangan terapi dan tukarkan langsung dengan{' '}
-                  <b>Reward / Hadiah Spesial</b> dari Griya Ayu di bawah ini.
-                </p>
-              </div>
-              <div className="bg-[#0B261C] text-[#D4AF37] px-3.5 py-2 rounded-2xl whitespace-nowrap border-2 border-[#D4AF37] shadow-sm text-right flex-shrink-0">
-                <span className="text-[10px] font-bold text-emerald-200 block uppercase leading-none">
-                  Saldo Poin Anda
-                </span>
-                <span className="text-sm sm:text-base font-black block mt-0.5">
-                  👑 {currentUser.points} Poin
-                </span>
-              </div>
-            </div>
-
-            {/* Panduan Perolehan Poin Setiap Transaksi */}
-            <div className="bg-[#0B261C] text-white p-3.5 rounded-2xl border border-[#D4AF37]/50 space-y-2 shadow-xs">
-              <span className="text-xs font-black uppercase tracking-wider text-[#D4AF37] block">
-                📈 Skema Perolehan Poin Setiap Transaksi:
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-xs sm:text-sm">
-                <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200 font-semibold">Layanan Rp 100rb</span>
-                  <span className="font-black text-amber-300">+5 Poin</span>
-                </div>
-                <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200 font-semibold">Layanan Rp 150rb</span>
-                  <span className="font-black text-amber-300">+10 Poin</span>
-                </div>
-                <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200 font-semibold">Layanan Rp 250rb</span>
-                  <span className="font-black text-amber-300">+15 Poin</span>
-                </div>
-                <div className="bg-black/30 px-3 py-2 rounded-xl flex justify-between items-center border border-white/10">
-                  <span className="text-stone-200 font-semibold">Layanan Rp 400rb</span>
-                  <span className="font-black text-amber-300">+20 Poin</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Daftar Kartu Katalog Reward yang Dikelola Admin */}
-            <div className="space-y-3 pt-1">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-black text-[#0B261C] flex items-center gap-1.5">
-                  <i className="fa-solid fa-gift text-emerald-800"></i>
-                  <span>Daftar Hadiah &amp; Penawaran Poin Aktif</span>
                 </h3>
-                <span className="text-xs font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-1 rounded-lg">
+                <span className="text-[11px] font-extrabold text-emerald-900 bg-emerald-100 px-2.5 py-1 rounded-lg shrink-0">
                   {catalogPointRewards.length} Reward Tersedia
                 </span>
               </div>
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Kumpulkan poin dari setiap kedatangan terapi dan tukarkan langsung dengan{' '}
+                <b className="text-[#0B261C]">Reward / Hadiah Spesial</b> dari Griya Ayu di bawah ini.
+              </p>
+            </div>
+
+            <div className="space-y-3">
 
               {catalogPointRewards.length === 0 ? (
                 <div className="bg-stone-50 border border-stone-200 rounded-2xl p-6 text-center space-y-1.5">

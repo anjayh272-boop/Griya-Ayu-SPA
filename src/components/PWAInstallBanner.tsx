@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Smartphone, Share, PlusSquare, X, CheckCircle2, Sparkles, MoreVertical } from 'lucide-react';
+import { Download, Smartphone, Share, PlusSquare, X, CheckCircle2, MoreVertical, Bell } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -8,6 +8,12 @@ interface BeforeInstallPromptEvent extends Event {
     platform: string;
   }>;
   prompt(): Promise<void>;
+}
+
+interface PWAInstallBannerProps {
+  showNotifPrompt?: boolean;
+  onEnableNotifications?: () => void;
+  onDismissNotifPrompt?: () => void;
 }
 
 // Store globally in case the event fires before component mounts
@@ -19,12 +25,17 @@ if (typeof window !== 'undefined') {
   });
 }
 
-export const PWAInstallBanner: React.FC = () => {
+export const PWAInstallBanner: React.FC<PWAInstallBannerProps> = ({
+  showNotifPrompt = false,
+  onEnableNotifications,
+  onDismissNotifPrompt,
+}) => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(globalDeferredPrompt);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [activeSlide, setActiveSlide] = useState<'install' | 'notif'>('install');
 
   useEffect(() => {
     const isStandalone =
@@ -67,7 +78,30 @@ export const PWAInstallBanner: React.FC = () => {
     };
   }, []);
 
-  if (isInstalled || isDismissed) return null;
+  const canShowInstall = !isInstalled && !isDismissed;
+  const canShowNotif = Boolean(showNotifPrompt);
+
+  useEffect(() => {
+    if (canShowInstall && canShowNotif) {
+      const interval = window.setInterval(() => {
+        setActiveSlide((prev) => (prev === 'install' ? 'notif' : 'install'));
+      }, 5000);
+      return () => window.clearInterval(interval);
+    } else if (canShowInstall) {
+      setActiveSlide('install');
+    } else if (canShowNotif) {
+      setActiveSlide('notif');
+    }
+  }, [canShowInstall, canShowNotif]);
+
+  if (!canShowInstall && !canShowNotif) return null;
+
+  const currentMode: 'install' | 'notif' =
+    canShowInstall && canShowNotif
+      ? activeSlide
+      : canShowInstall
+      ? 'install'
+      : 'notif';
 
   const handleInstallClick = async () => {
     const promptToUse = deferredPrompt || globalDeferredPrompt;
@@ -89,37 +123,83 @@ export const PWAInstallBanner: React.FC = () => {
     }
   };
 
+  const handleCloseBanner = () => {
+    setIsDismissed(true);
+    if (onDismissNotifPrompt) {
+      onDismissNotifPrompt();
+    }
+  };
+
   return (
     <>
-      <div className="mx-3 mt-2 mb-0.5 rounded-xl bg-gradient-to-r from-[#0f3d2e] via-[#124937] to-[#0B261C] border border-[#D4AF37]/50 px-2.5 py-2 shadow-sm relative overflow-hidden">
+      <div className="mx-3 mt-1.5 mb-0.5 rounded-xl bg-gradient-to-r from-[#0B261C] via-[#124231] to-[#0B261C] border border-[#D4AF37]/45 px-2.5 py-1.5 shadow-xs relative overflow-hidden">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <div className="w-7 h-7 rounded-lg bg-[#D4AF37]/20 border border-[#D4AF37]/50 flex items-center justify-center shrink-0">
-              <Smartphone className="w-3.5 h-3.5 text-[#D4AF37]" />
+          {currentMode === 'install' ? (
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="w-6 h-6 rounded-lg bg-[#D4AF37]/20 border border-[#D4AF37]/50 flex items-center justify-center shrink-0">
+                <Smartphone className="w-3.5 h-3.5 text-[#D4AF37]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-black text-[#D4AF37] truncate leading-tight">
+                  Pasang Aplikasi Griya Ayu
+                </p>
+                <p className="text-[10px] text-[#F5F5F0]/80 truncate leading-tight">
+                  Akses booking &amp; poin lebih cepat di HP
+                </p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-black text-[#D4AF37] truncate leading-tight">
-                📲 Pasang Aplikasi Griya Ayu
-              </p>
-              <p className="text-[10px] text-[#F5F5F0]/85 truncate leading-tight">
-                Akses booking &amp; poin lebih cepat di layar HP
-              </p>
+          ) : (
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="w-6 h-6 rounded-lg bg-[#D4AF37]/20 border border-[#D4AF37]/50 flex items-center justify-center shrink-0">
+                <Bell className="w-3.5 h-3.5 text-[#D4AF37]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-black text-[#D4AF37] truncate leading-tight">
+                  Notifikasi Booking HP
+                </p>
+                <p className="text-[10px] text-[#F5F5F0]/80 truncate leading-tight">
+                  Aktifkan info status jadwal &amp; promo di HP
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={handleInstallClick}
-              className="py-1.5 px-2.5 rounded-lg bg-gradient-to-r from-[#D4AF37] to-[#b5952f] text-[#0B261C] font-black text-[11px] shadow-xs hover:brightness-105 active:scale-[0.99] transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
-            >
-              <Download className="w-3 h-3 shrink-0 stroke-[2.5]" />
-              <span>Instal</span>
-            </button>
+            {canShowInstall && canShowNotif && (
+              <button
+                type="button"
+                onClick={() => setActiveSlide((prev) => (prev === 'install' ? 'notif' : 'install'))}
+                title="Ganti info banner"
+                className="px-1.5 py-0.5 rounded-md bg-white/10 hover:bg-white/15 text-[9px] font-extrabold text-amber-200 border border-white/15 tabular-nums"
+              >
+                {currentMode === 'install' ? '1/2' : '2/2'}
+              </button>
+            )}
+
+            {currentMode === 'install' ? (
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="py-1 px-2.5 rounded-lg bg-gradient-to-r from-[#D4AF37] to-[#b5952f] text-[#0B261C] font-black text-[11px] shadow-xs hover:brightness-105 active:scale-[0.99] transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <Download className="w-3 h-3 shrink-0 stroke-[2.5]" />
+                <span>Instal</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onEnableNotifications}
+                className="py-1 px-2.5 rounded-lg bg-gradient-to-r from-[#D4AF37] to-[#b5952f] text-[#0B261C] font-black text-[11px] shadow-xs hover:brightness-105 active:scale-[0.99] transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <span>Aktifkan</span>
+              </button>
+            )}
 
             <button
-              onClick={() => setIsDismissed(true)}
-              aria-label="Tutup banner instalasi"
-              className="p-1 rounded-lg text-[#F5F5F0]/60 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+              type="button"
+              onClick={handleCloseBanner}
+              aria-label="Tutup banner"
+              className="p-1 rounded-lg text-[#F5F5F0]/70 hover:text-white hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
