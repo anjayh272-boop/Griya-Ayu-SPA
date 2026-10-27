@@ -2158,6 +2158,7 @@ export default function App() {
             adminProfile={adminProfile}
             onLoginSuccess={handleLoginSuccess}
             onRegisterSuccess={handleRegisterSuccess}
+            onUpdateCustomerAccount={handleUpdateCustomerAccount}
             onShowToast={showToast}
           />
         )}

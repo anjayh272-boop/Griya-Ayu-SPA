@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import type {
   ServiceItem,
   PointReward,
@@ -286,23 +287,31 @@ export function isMonthRevenueOrder(
   );
 }
 
-function escapeCsvCell(val: string | number): string {
+function escapeCsvCellSemicolon(val: string | number): string {
   const str = String(val ?? '').replace(/"/g, '""');
   return `"${str}"`;
 }
 
-export function downloadMonthlyRevenueCsv(
-  orders: BookingOrder[],
-  monthPrefix: string = getCurrentMonthPrefix()
-): void {
-  const monthLabel = formatMonthYearIndo(monthPrefix);
-  const sorted = [...orders].sort((a, b) => {
-    const dCmp = a.date.localeCompare(b.date);
-    if (dCmp !== 0) return dCmp;
-    return a.time.localeCompare(b.time);
-  });
+function formatWaTextForReport(rawWa: string): string {
+  const digits = String(rawWa || '').replace(/[^0-9]/g, '');
+  if (!digits) return '-';
+  if (digits.startsWith('62')) return '0' + digits.slice(2);
+  if (!digits.startsWith('0')) return '0' + digits;
+  return digits;
+}
 
-  const totalOmzet = sorted.reduce((sum, item) => sum + item.total, 0);
+/**
+ * Fallback CSV jika lingkungan browser gagal mengunduh file .xlsx native:
+ * Menggunakan UTF-8 BOM (\uFEFF), pemisah titik koma (;), dan format '="08..."' untuk nomor telepon.
+ */
+function downloadMonthlyRevenueCsvFallback(
+  sorted: BookingOrder[],
+  monthLabel: string,
+  periodSlug: string
+): string {
+  const totalOmzet = sorted.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+  const dataStartRow = 8;
+  const lastDataRow = sorted.length > 0 ? dataStartRow + sorted.length - 1 : dataStartRow;
 
   const headers = [
     'No',
@@ -313,60 +322,75 @@ export function downloadMonthlyRevenueCsv(
     'No. WhatsApp',
     'Layanan',
     'Metode Pembayaran',
-    'Status Verifikasi',
-    'Nominal Omzet (Rp)',
-    'Nominal Terformat',
+    'Nominal (Rp)',
+    'Status',
   ];
 
   const rows: string[] = [];
+  rows.push(escapeCsvCellSemicolon('GRIYA AYU SPORT MASSAGE & SPA'));
   rows.push(
-    `"LAPORAN OMZET BULANAN GRIYA AYU SPORT MASSAGE & SPA — PERIODE ${monthLabel.toUpperCase()}"`
+    escapeCsvCellSemicolon(
+      `Laporan Rekapitulasi Pendapatan & Omzet Bulanan - Periode ${monthLabel}`
+    )
   );
-  rows.push(`"Dicetak pada: ${new Date().toLocaleString('id-ID')}","Total Transaksi: ${sorted.length}","Total Omzet: ${formatRupiah(totalOmzet)}"`);
   rows.push('');
-  rows.push(headers.map(escapeCsvCell).join(','));
+  rows.push(
+    [
+      escapeCsvCellSemicolon('Total Transaksi'),
+      escapeCsvCellSemicolon(
+        sorted.length > 0 ? `=COUNTA(B${dataStartRow}:B${lastDataRow})` : 0
+      ),
+    ].join(';')
+  );
+  rows.push(
+    [
+      escapeCsvCellSemicolon('Total Omzet'),
+      escapeCsvCellSemicolon(`=SUM(I${dataStartRow}:I${lastDataRow})`),
+    ].join(';')
+  );
+  rows.push('');
+  rows.push(headers.map(escapeCsvCellSemicolon).join(';'));
 
   if (sorted.length === 0) {
     rows.push(
       [
         '-',
+        '',
         '-',
-        monthPrefix,
         '-',
-        'Belum ada transaksi terverifikasi pada bulan ini',
-        '-',
+        'Belum ada transaksi terverifikasi pada periode ini',
         '-',
         '-',
         '-',
         0,
-        'Rp 0',
+        '-',
       ]
-        .map(escapeCsvCell)
-        .join(',')
+        .map(escapeCsvCellSemicolon)
+        .join(';')
     );
   } else {
     sorted.forEach((order, idx) => {
+      const cleanWa = formatWaTextForReport(order.wa);
+      const timeStr = order.time?.includes('WIB') ? order.time : `${order.time} WIB`;
       rows.push(
         [
           idx + 1,
           `GA-${String(order.id).slice(-6)}`,
-          `${order.date} (${order.datePretty})`,
-          `${order.time} WIB`,
+          order.date,
+          timeStr,
           order.customer,
-          order.wa,
+          `'="${cleanWa}"`,
           order.items,
           order.payMethod,
+          Number(order.total) || 0,
           order.paymentStatus,
-          order.total,
-          formatRupiah(order.total),
         ]
-          .map(escapeCsvCell)
-          .join(',')
+          .map(escapeCsvCellSemicolon)
+          .join(';')
       );
     });
   }
 
-  rows.push('');
   rows.push(
     [
       '',
@@ -376,26 +400,260 @@ export function downloadMonthlyRevenueCsv(
       '',
       '',
       '',
-      '',
-      'TOTAL OMZET BULANAN',
+      'TOTAL OMZET',
+      `=SUM(I${dataStartRow}:I${lastDataRow})`,
       totalOmzet,
-      formatRupiah(totalOmzet),
     ]
-      .map(escapeCsvCell)
-      .join(',')
+      .map(escapeCsvCellSemicolon)
+      .join(';')
   );
 
-  // Gunakan UTF-8 BOM (\uFEFF) agar langsung rapi saat dibuka di Microsoft Excel
+  const fileName = `Laporan_Omzet_Griya_Ayu_${periodSlug}.csv`;
   const csvContent = '\uFEFF' + rows.join('\r\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.setAttribute('download', `Laporan_Omzet_Bulanan_Griya_Ayu_${monthPrefix}.csv`);
+  link.setAttribute('download', fileName);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+  return fileName;
+}
+
+/**
+ * Mengunduh Laporan Rekapitulasi Pendapatan & Omzet Bulanan dalam format Excel asli (.xlsx)
+ * menggunakan SheetJS (xlsx) lengkap dengan rumus =COUNTA(), =SUM(), format mata uang Rp #,##0,
+ * proteksi teks nomor WhatsApp ('@'), dan auto column width (!cols).
+ */
+export function downloadMonthlyRevenueCsv(
+  orders: BookingOrder[],
+  monthPrefix: string = getCurrentMonthPrefix()
+): string {
+  const monthLabel = formatMonthYearIndo(monthPrefix);
+  const periodSlug = monthLabel.replace(/\s+/g, '_');
+  const fileName = `Laporan_Omzet_Griya_Ayu_${periodSlug}.xlsx`;
+
+  const sorted = [...orders].sort((a, b) => {
+    const dCmp = a.date.localeCompare(b.date);
+    if (dCmp !== 0) return dCmp;
+    return a.time.localeCompare(b.time);
+  });
+
+  const totalOmzet = sorted.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+
+  try {
+    // Baris 1-2: Judul & Subjudul
+    // Baris 4-5: KPI Ringkasan (Total Transaksi & Total Omzet)
+    // Baris 7: Header Tabel Utama (No | ID Booking | Tanggal | Jam (WIB) | Nama Pelanggan | No. WhatsApp | Layanan | Metode Pembayaran | Nominal (Rp) | Status)
+    // Baris 8 dst: Data Transaksi
+    // Baris Terakhir: TOTAL OMZET dengan rumus =SUM(...)
+    const dataStartRow = 8; // 1-indexed Excel row
+    const lastDataRow = sorted.length > 0 ? dataStartRow + sorted.length - 1 : dataStartRow;
+    const totalRowNumber = lastDataRow + 1;
+
+    const headers = [
+      'No',
+      'ID Booking',
+      'Tanggal',
+      'Jam (WIB)',
+      'Nama Pelanggan',
+      'No. WhatsApp',
+      'Layanan',
+      'Metode Pembayaran',
+      'Nominal (Rp)',
+      'Status',
+    ];
+
+    const aoa: (string | number)[][] = [
+      ['GRIYA AYU SPORT MASSAGE & SPA', '', '', '', '', '', '', '', '', ''],
+      [
+        `Laporan Rekapitulasi Pendapatan & Omzet Bulanan - Periode ${monthLabel}`,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ],
+      [],
+      ['Total Transaksi', '', sorted.length, '', '', '', '', '', '', ''],
+      ['Total Omzet', '', totalOmzet, '', '', '', '', '', '', ''],
+      [],
+      headers,
+    ];
+
+    if (sorted.length === 0) {
+      aoa.push([
+        '-',
+        '',
+        monthPrefix,
+        '-',
+        'Belum ada transaksi terverifikasi pada periode ini',
+        '-',
+        '-',
+        '-',
+        0,
+        '-',
+      ]);
+    } else {
+      sorted.forEach((order, idx) => {
+        const cleanWa = formatWaTextForReport(order.wa);
+        const cleanTime = (order.time || '').replace(/\s*WIB$/i, '').trim();
+        const timeFormatted = cleanTime ? `${cleanTime} WIB` : '-';
+        aoa.push([
+          idx + 1,
+          `GA-${String(order.id).slice(-6)}`,
+          order.date,
+          timeFormatted,
+          order.customer || '-',
+          cleanWa,
+          order.items || '-',
+          order.payMethod || '-',
+          Number(order.total) || 0,
+          order.paymentStatus || '-',
+        ]);
+      });
+    }
+
+    // Baris Total di paling bawah
+    aoa.push([
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      'TOTAL OMZET',
+      totalOmzet,
+      '',
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Merge sel untuk Judul, Subjudul, dan Label KPI
+    ws['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }, // A1:J1 Judul Laporan
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } }, // A2:J2 Subjudul Laporan
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 1 } }, // A4:B4 Label Total Transaksi
+      { s: { r: 4, c: 0 }, e: { r: 4, c: 1 } }, // A5:B5 Label Total Omzet
+    ];
+
+    // Set rumus KPI Ringkasan pada Baris 4 & Baris 5 (C4 dan C5)
+    ws['C4'] = {
+      t: 'n',
+      f: `COUNTA(B${dataStartRow}:B${lastDataRow})`,
+      v: sorted.length,
+      z: '#,##0',
+    };
+    ws['C5'] = {
+      t: 'n',
+      f: `SUM(I${dataStartRow}:I${lastDataRow})`,
+      v: totalOmzet,
+      z: '"Rp" #,##0',
+    };
+
+    // Format spesifik setiap baris data transaksi (Baris 8 s/d lastDataRow)
+    for (let rIdx = dataStartRow - 1; rIdx <= lastDataRow - 1; rIdx++) {
+      // Kolom C (index 2): Tanggal (YYYY-MM-DD) -> string
+      const dateRef = XLSX.utils.encode_cell({ r: rIdx, c: 2 });
+      if (ws[dateRef]) {
+        ws[dateRef].t = 's';
+        ws[dateRef].z = '@';
+      }
+
+      // Kolom D (index 3): Jam (HH:mm WIB) -> string
+      const timeRef = XLSX.utils.encode_cell({ r: rIdx, c: 3 });
+      if (ws[timeRef]) {
+        ws[timeRef].t = 's';
+        ws[timeRef].z = '@';
+      }
+
+      // Kolom F (index 5): No. WhatsApp -> paksa tipe teks ('s') & format '@' agar tidak menjadi scientific (8.78E+10)
+      const waRef = XLSX.utils.encode_cell({ r: rIdx, c: 5 });
+      if (ws[waRef]) {
+        ws[waRef].t = 's';
+        ws[waRef].v = String(ws[waRef].v ?? '');
+        ws[waRef].z = '@';
+      }
+
+      // Kolom I (index 8): Nominal (Rp) -> angka murni ('n') dengan number format "Rp" #,##0
+      const nominalRef = XLSX.utils.encode_cell({ r: rIdx, c: 8 });
+      if (ws[nominalRef]) {
+        const numericVal = Number(ws[nominalRef].v) || 0;
+        ws[nominalRef] = {
+          t: 'n',
+          v: numericVal,
+          z: '"Rp" #,##0',
+        };
+      }
+    }
+
+    // Set rumus =SUM(...) pada baris TOTAL OMZET paling bawah (Kolom I)
+    const totalCellRef = `I${totalRowNumber}`;
+    ws[totalCellRef] = {
+      t: 'n',
+      f: `SUM(I${dataStartRow}:I${lastDataRow})`,
+      v: totalOmzet,
+      z: '"Rp" #,##0',
+    };
+
+    // Hitung lebar kolom otomatis (!cols) berdasarkan panjang teks terpanjang + batas minimal
+    const minColWidths = [
+      6,  // No
+      16, // ID Booking (min 15)
+      14, // Tanggal (YYYY-MM-DD)
+      14, // Jam (WIB)
+      20, // Nama Pelanggan (min 18)
+      19, // No. WhatsApp (min 18)
+      28, // Layanan (min 22)
+      24, // Metode Pembayaran
+      18, // Nominal (Rp)
+      24, // Status
+    ];
+
+    const tableRowsForWidth = aoa.slice(6); // mulai dari baris header tabel (baris ke-7)
+    ws['!cols'] = minColWidths.map((minW, colIdx) => {
+      let maxLen = minW;
+      for (const row of tableRowsForWidth) {
+        const rawCell = row[colIdx];
+        if (rawCell === undefined || rawCell === null) continue;
+        const displayStr =
+          colIdx === 8 && typeof rawCell === 'number'
+            ? formatRupiah(rawCell)
+            : String(rawCell);
+        if (displayStr.length + 3 > maxLen) {
+          maxLen = displayStr.length + 3;
+        }
+      }
+      return { wch: Math.min(maxLen, 52) };
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Omzet ${monthLabel}`.slice(0, 31));
+
+    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([excelBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    return fileName;
+  } catch {
+    return downloadMonthlyRevenueCsvFallback(sorted, monthLabel, periodSlug);
+  }
 }
 
 /**

@@ -401,12 +401,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const monthLabelIndo = formatMonthYearIndo(selectedMonthPrefix);
 
   const handleDownloadMonthlyCsv = () => {
-    downloadMonthlyRevenueCsv(monthlyVerifiedOrders, selectedMonthPrefix);
+    const downloadedFileName = downloadMonthlyRevenueCsv(
+      monthlyVerifiedOrders,
+      selectedMonthPrefix
+    );
     onShowToast(
-      'Laporan Bulanan Diunduh (CSV/Excel)! 📊',
-      `File "Laporan_Omzet_Bulanan_Griya_Ayu_${selectedMonthPrefix}.csv" (${monthlyVerifiedOrders.length} transaksi • Total ${formatRupiah(
+      'Laporan Bulanan Diunduh (Excel .XLSX)! 📊',
+      `File "${downloadedFileName}" (${monthlyVerifiedOrders.length} transaksi • Total ${formatRupiah(
         monthlyOmzetTotal
-      )}) berhasil diunduh dan siap dibuka di Microsoft Excel.`
+      )}) berhasil diunduh dengan format kolom rapi dan rumus otomatis Microsoft Excel.`
     );
   };
 
@@ -3112,15 +3115,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 )}
 
-                {/* Baris Tombol Unduh Laporan Bulanan (Excel/CSV) & Toggle Rincian */}
+                {/* Baris Tombol Unduh Laporan Bulanan (Excel .XLSX) & Toggle Rincian */}
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={handleDownloadMonthlyCsv}
-                    className="tactile-btn gold-shimmer-card flex-1 min-h-[42px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#071A12] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-200 shadow-md flex items-center justify-center gap-2"
+                    className="tactile-btn gold-shimmer-card flex-1 min-h-[42px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#071A12] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-200 shadow-md flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <i className="fa-solid fa-file-excel text-emerald-950 text-sm flex-shrink-0"></i>
-                    <span className="truncate">Unduh Laporan Bulanan (CSV)</span>
+                    <span className="truncate">Unduh Laporan Excel (.xlsx)</span>
                   </button>
 
                   <button
