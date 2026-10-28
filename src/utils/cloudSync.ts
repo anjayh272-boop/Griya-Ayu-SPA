@@ -175,6 +175,48 @@ export async function updateCustomerPasswordInCloud(
 }
 
 /**
+ * Perbarui nomor WhatsApp pelanggan di Firestore (ketika nomor lama hangus / tidak aktif)
+ * tanpa menghilangkan poin loyalitas, status keanggotaan, maupun kata sandi,
+ * serta hapus dokumen dengan kunci nomor lama agar tidak terjadi duplikasi akun.
+ */
+export async function updateCustomerPhoneInCloud(
+  existingCustomer: User,
+  oldPhone: string,
+  newPhone: string
+): Promise<User> {
+  const cleanOldPhone = normalizePhoneDigits(oldPhone || existingCustomer.phone);
+  const cleanNewPhone = normalizePhoneDigits(newPhone);
+
+  const updatedCustomer: User = {
+    ...existingCustomer,
+    id: existingCustomer.id || cleanOldPhone || cleanNewPhone,
+    phone: cleanNewPhone,
+    points: existingCustomer.points,
+    role: existingCustomer.role === 'admin' ? 'admin' : existingCustomer.role || 'customer',
+    status: existingCustomer.status || 'active',
+  };
+
+  if (!cleanNewPhone || cleanNewPhone.length < 5) return updatedCustomer;
+
+  const newPath = `${CLOUD_COLLECTIONS.CUSTOMERS}/${cleanNewPhone}`;
+  try {
+    const payload = sanitizeCustomerPayload(updatedCustomer);
+    await setDoc(doc(db, CLOUD_COLLECTIONS.CUSTOMERS, cleanNewPhone), payload, { merge: true });
+
+    if (cleanOldPhone && cleanOldPhone !== cleanNewPhone) {
+      await deleteDoc(doc(db, CLOUD_COLLECTIONS.CUSTOMERS, cleanOldPhone));
+    }
+  } catch (error) {
+    try {
+      handleFirestoreError(error, OperationType.WRITE, newPath);
+    } catch {
+      // Non-fatal: tetap tersimpan di localStorage bila offline
+    }
+  }
+  return updatedCustomer;
+}
+
+/**
  * Simpan / perbarui daftar pelanggan ke Firestore global.
  */
 export async function syncAllCustomersToCloud(users: User[]): Promise<void> {

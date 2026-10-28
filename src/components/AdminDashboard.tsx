@@ -54,7 +54,7 @@ interface AdminDashboardProps {
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
-  onUpdateCustomerAccount?: (updated: User) => void;
+  onUpdateCustomerAccount?: (updated: User, oldPhone?: string) => void;
   onUpdatePointRewards?: (nextRewards: PointReward[]) => void;
   onUpdateServices?: (
     nextSingleServices: ServiceItem[],
@@ -1903,42 +1903,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         )}
 
                         {!isLunasOrder && !isCompleted ? (
-                          <a
-                            href={confirmMsg.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
                             onClick={() => onVerifyPayment(b.id)}
                             className="tactile-btn gold-shimmer-card w-full min-h-[44px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-300 shadow-sm flex items-center justify-center gap-2 text-center"
                           >
                             <i className="fa-solid fa-money-bill-wave text-emerald-900 text-sm"></i>
-                            <span>Terima Pembayaran Cash (Ubah Jadi LUNAS) & Kirim WA</span>
-                          </a>
+                            <span>Konfirmasi Pesanan / Tandai Lunas & Kirim WA Otomatis</span>
+                          </button>
                         ) : !isConfirmedAcc && !isCompleted ? (
-                          <a
-                            href={confirmMsg.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
                             onClick={() => onVerifyPayment(b.id)}
                             className="tactile-btn w-full min-h-[42px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 text-center"
                           >
                             <i className="fa-brands fa-whatsapp text-sm"></i>
-                            <span>Kirim WA Konfirmasi Jadwal (Sudah Lunas)</span>
-                          </a>
+                            <span>Konfirmasi Pesanan / Tandai Lunas (Kirim WA Otomatis)</span>
+                          </button>
                         ) : (
                           <div className="flex items-center justify-between gap-2 flex-wrap bg-emerald-100/90 border border-emerald-300 rounded-xl px-3 py-2">
                             <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                               <i className="fa-solid fa-circle-check text-emerald-600"></i>
                               <span>Terkonfirmasi & Lunas</span>
                             </span>
-                            <a
-                              href={confirmMsg.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => onVerifyPayment(b.id)}
                               className="tactile-btn bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-1.5 px-3 rounded-lg text-xs flex items-center gap-1 shadow-2xs"
                             >
                               <i className="fa-brands fa-whatsapp"></i>
                               <span>Kirim WA</span>
-                            </a>
+                            </button>
                           </div>
                         )}
                       </div>

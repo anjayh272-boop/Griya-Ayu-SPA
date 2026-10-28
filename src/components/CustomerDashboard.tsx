@@ -28,8 +28,6 @@ import {
   checkBookingRefundEligibility,
   checkBookingRescheduleEligibility,
   compressImageFileToDataUrl,
-  buildCustomerBookingWaToAdminMessage,
-  buildCustomerToAdminRefundWaMessage,
   normalizeHomeServiceSchedule,
   isHomeServiceDateAvailable,
   getActiveHomeServiceSlotsForDate,
@@ -2987,21 +2985,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                           )}
                         </div>
                         <div className="flex flex-col sm:flex-row gap-2">
-                          <a
-                            href={buildCustomerToAdminRefundWaMessage(b)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="tactile-btn flex-1 min-h-[42px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs"
-                          >
-                            <i className="fa-brands fa-whatsapp text-base"></i>
-                            <span>Kirim Permintaan Refund ke WhatsApp Admin</span>
-                          </a>
                           <button
                             type="button"
                             onClick={() => handleOpenRefundModal(b)}
-                            className="tactile-btn bg-white hover:bg-stone-100 text-stone-700 border border-amber-300 font-bold py-2 px-3 rounded-xl text-[11px]"
+                            className="tactile-btn w-full bg-white hover:bg-stone-100 text-stone-700 border border-amber-300 font-bold py-2 px-3 rounded-xl text-[11px]"
                           >
-                            Ubah No. Rekening
+                            Ubah No. Rekening Tujuan Refund
                           </button>
                         </div>
                       </div>
@@ -3035,18 +3024,22 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </div>
                     )}
 
-                    {/* Baris Tombol Utama: Kirim Bukti Booking ke WA Admin, Lihat Struk / Bayar Pending & Batalkan / Ajukan Refund */}
+                    {/* Baris Notifikasi Otomatis WhatsApp, Lihat Struk / Bayar Pending & Batalkan / Ajukan Refund */}
                     <div className="space-y-2 pt-2 border-t border-stone-100">
                       {isPaid && !isRefundWaiting && !isRefundDone && (
-                        <a
-                          href={buildCustomerBookingWaToAdminMessage(b).url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="tactile-btn w-full min-h-[44px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xs border border-emerald-500"
-                        >
-                          <i className="fa-brands fa-whatsapp text-base"></i>
-                          <span>Kirim Bukti Booking ke WhatsApp Admin</span>
-                        </a>
+                        <div className="bg-gradient-to-r from-[#0B261C] via-[#143d2d] to-[#0B261C] border border-[#D4AF37]/75 rounded-2xl p-3 text-left shadow-xs flex items-start gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-[#25D366]/20 border border-[#25D366]/50 text-[#25D366] flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <i className="fa-brands fa-whatsapp text-base"></i>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37] block">
+                              Notifikasi Otomatis WhatsApp Resmi
+                            </span>
+                            <p className="text-[11px] text-emerald-50 font-medium leading-relaxed mt-0.5">
+                              Detail reservasi Anda telah dikirimkan secara otomatis ke nomor WhatsApp terdaftar. Mohon cek pesan masuk dari WhatsApp resmi Griya Ayu.
+                            </p>
+                          </div>
+                        </div>
                       )}
 
                       <div className="flex flex-col sm:flex-row gap-2">

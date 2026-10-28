@@ -9,7 +9,6 @@ import {
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_BANK_ACCOUNTS,
-  buildCustomerBookingWaToAdminMessage,
   buildAdminWaConfirmationMessage,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
@@ -154,7 +153,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
-  const customerToAdminBookingWa = buildCustomerBookingWaToAdminMessage(order);
   const adminToCustomerConfirmation = buildAdminWaConfirmationMessage(order);
 
   return (
@@ -641,15 +639,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <p className="text-[11px] text-emerald-900 font-bold leading-snug bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
                   <i className="fa-solid fa-circle-check mr-1.5 text-emerald-600"></i>
                   Pembayaran <b>BERHASIL</b> & jadwal sesi <b>{order.time} WIB</b> telah dikunci
-                  secara permanen (<b>{order.paymentStatus}</b>). Klik tombol WhatsApp di bawah untuk
-                  mengirim bukti booking ke Admin.
+                  secara permanen (<b>{order.paymentStatus}</b>).
                 </p>
               </div>
             )}
           </div>
 
-          {/* Tombol Kirim Bukti Booking ke WhatsApp Admin / ACC Admin */}
-          <div className="space-y-2">
+          {/* Notifikasi Otomatis WhatsApp Pelanggan / ACC Admin */}
+          <div className="space-y-2.5">
             {isAdmin ? (
               <a
                 href={adminToCustomerConfirmation.url}
@@ -661,15 +658,19 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <span>ACC & Kirim Konfirmasi WA ke Pelanggan</span>
               </a>
             ) : isLocked ? (
-              <a
-                href={customerToAdminBookingWa.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="tactile-btn gold-shimmer-card flex items-center justify-center gap-2 w-full min-h-[50px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-3.5 px-4 rounded-2xl text-xs sm:text-sm shadow-lg uppercase tracking-wide border border-emerald-400 text-center"
-              >
-                <i className="fa-brands fa-whatsapp text-lg flex-shrink-0"></i>
-                <span>Kirim Bukti Booking ke WhatsApp Admin</span>
-              </a>
+              <div className="bg-gradient-to-r from-[#0B261C] via-[#143d2d] to-[#0B261C] border border-[#D4AF37]/80 rounded-2xl p-3.5 text-left shadow-md flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#25D366]/20 border border-[#25D366]/50 text-[#25D366] flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <i className="fa-brands fa-whatsapp text-lg"></i>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37] block mb-0.5">
+                    Notifikasi Otomatis WhatsApp Resmi
+                  </span>
+                  <p className="text-xs text-emerald-50 font-medium leading-relaxed">
+                    Detail reservasi Anda telah dikirimkan secara otomatis ke nomor WhatsApp terdaftar. Mohon cek pesan masuk dari WhatsApp resmi Griya Ayu.
+                  </p>
+                </div>
+              </div>
             ) : null}
 
             <button

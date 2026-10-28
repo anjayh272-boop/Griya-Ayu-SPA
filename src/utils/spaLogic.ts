@@ -1369,7 +1369,14 @@ export async function sendPasswordResetWhatsApp(
   newPassword: string
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
   const cleanTarget = normalizePhoneDigits(customerPhone) || customerPhone;
-  const message = `Halo Kak ${customerName} 🌿\n\nKata sandi akun Griya Ayu Sport Massage & SPA Anda telah berhasil direset oleh Admin.\n\nKata sandi baru Anda: *${newPassword}*\n\nSilakan gunakan kata sandi ini untuk masuk ke website/aplikasi di https://griyaayu.vercel.app dan segera ganti kata sandi Anda demi keamanan akun. Terima kasih! 🙏✨`;
+  const message =
+    'Halo Kak ' +
+    customerName +
+    '! 🌿\n\nKata sandi akun member Griya Ayu Sport Massage & SPA Anda telah berhasil direset oleh Admin.\n\nBerikut data login akun Anda:\n📱 Nomor WhatsApp: *' +
+    cleanTarget +
+    '*\n🔑 Kata Sandi Baru: *' +
+    newPassword +
+    '*\n\nSilakan langsung login melalui: https://griyaayu.vercel.app\nDemi keamanan akun, Kakak dapat mengubah kata sandi ini kembali setelah berhasil masuk.\n\nSalam sehat selalu! 🙏✨';
   return sendWhatsAppViaVpsGateway(cleanTarget, message);
 }
 
@@ -1387,229 +1394,121 @@ export function generateReadableRandomPassword(length: number = 7): string {
   return result;
 }
 
-const sentBookingConfirmationIds = new Set<number>();
+export type BookingWaStatusType = 'pending' | 'lunas' | 'batal' | 'gagal';
+
+const sentBookingStatusWaKeys = new Set<string>();
+
+/**
+ * Mengirim notifikasi WhatsApp otomatis ke pelanggan berdasarkan perubahan status booking
+ * melalui endpoint WhatsApp Gateway (/wa-api/api/send-message).
+ */
+export async function sendBookingStatusWhatsApp(
+  order: BookingOrder,
+  statusType: BookingWaStatusType,
+  options?: { adminPhone?: string; force?: boolean }
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const dedupeKey = `${order.id}:${statusType}`;
+  if (order.id && !options?.force && sentBookingStatusWaKeys.has(dedupeKey)) {
+    return {
+      ok: true,
+      detail: `Notifikasi WhatsApp (${statusType}) untuk booking ini sudah dikirim.`,
+    };
+  }
+  if (order.id) {
+    sentBookingStatusWaKeys.add(dedupeKey);
+  }
+
+  const idBooking = `#GA-${String(order.id).slice(-6)}`;
+  const namaPelanggan = order.customer || 'Pelanggan Griya Ayu';
+  const namaLayanan = order.items || '-';
+  const tanggal = order.datePretty || order.date || '-';
+  const jam = order.time || '-';
+  const totalHarga = formatRupiah(order.total);
+  const customerTarget = normalizePhoneDigits(order.wa) || order.wa;
+
+  let templatePesan = '';
+
+  if (statusType === 'pending') {
+    templatePesan =
+      'Halo Kak ' +
+      namaPelanggan +
+      '! 🌿\n\nTerima kasih telah melakukan reservasi di Griya Ayu Sport Massage & SPA.\n\nBerikut rincian pesanan Anda:\n📋 *ID Booking:* ' +
+      idBooking +
+      '\n💆 *Layanan:* ' +
+      namaLayanan +
+      '\n📅 *Jadwal:* ' +
+      tanggal +
+      ' | ' +
+      jam +
+      ' WIB\n💰 *Total Tagihan:* ' +
+      totalHarga +
+      '\n\n⚠️ *Status:* *MENUNGGU PEMBAYARAN*\nMohon segera selesaikan pembayaran sesuai instruksi di web agar slot treatment Anda tidak kedaluwarsa. Abaikan jika Anda memilih pembayaran tunai di tempat.\n\nTerima kasih! 🙏✨';
+  } else if (statusType === 'lunas') {
+    templatePesan =
+      'Halo Kak ' +
+      namaPelanggan +
+      '! 🌿\n\nPembayaran/Reservasi Anda telah *TERKONFIRMASI & LUNAS*! ✅\n\nDetail Kedatangan:\n📋 *ID Booking:* ' +
+      idBooking +
+      '\n💆 *Layanan:* ' +
+      namaLayanan +
+      '\n📅 *Jadwal:* ' +
+      tanggal +
+      ' | ' +
+      jam +
+      ' WIB\n📍 *Lokasi:* Griya Ayu Sport Massage & SPA\n\n📌 *Catatan Penting:*\nHarap hadir 10–15 menit sebelum jadwal sesi dimulai. Tunjukkan pesan ini atau sebutkan ID Booking kepada staf resepsionis kami saat tiba.\n\nSampai jumpa dan nikmati kenyamanan treatment Anda! 🙏✨';
+  } else if (statusType === 'batal') {
+    templatePesan =
+      'Halo Kak ' +
+      namaPelanggan +
+      '! 🌿\n\nReservasi Anda dengan rincian berikut telah *DIBATALKAN*:\n📋 *ID Booking:* ' +
+      idBooking +
+      '\n💆 *Layanan:* ' +
+      namaLayanan +
+      '\n📅 *Jadwal:* ' +
+      tanggal +
+      ' | ' +
+      jam +
+      ' WIB\n\nJika ini adalah kekeliruan atau Kakak ingin menjadwalkan ulang treatment, silakan lakukan reservasi kembali di web resmi kami: https://griyaayu.vercel.app\n\nTerima kasih! 🙏';
+  } else {
+    templatePesan =
+      'Halo Kak ' +
+      namaPelanggan +
+      '! 🌿\n\nBatas waktu pembayaran untuk reservasi berikut telah berakhir (Kedaluwarsa):\n📋 *ID Booking:* ' +
+      idBooking +
+      '\n💆 *Layanan:* ' +
+      namaLayanan +
+      '\n\nSlot jadwal telah kami lepas kembali ke sistem. Kakak dapat membuat pesanan baru kapan saja melalui web kami: https://griyaayu.vercel.app\n\nSalam sehat selalu dari Griya Ayu! 🙏✨';
+  }
+
+  return sendWhatsAppViaVpsGateway(customerTarget, templatePesan);
+}
 
 /**
  * Mengirim notifikasi konfirmasi reservasi otomatis ke WhatsApp pelanggan
- * serta notifikasi pesanan baru ke WhatsApp Admin Griya Ayu saat booking berhasil dibuat.
+ * saat booking berhasil dibuat / dikonfirmasi.
  */
 export async function sendBookingSummaryWhatsApp(
   order: BookingOrder,
   adminPhone: string = GRIYA_AYU_ADMIN_PHONE
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
-  if (order.id && sentBookingConfirmationIds.has(order.id)) {
-    return {
-      ok: true,
-      detail: 'Notifikasi WhatsApp untuk booking ini sudah dikirim.',
-    };
-  }
-  if (order.id) {
-    sentBookingConfirmationIds.add(order.id);
-  }
-
-  const bookingCode = `GA-${String(order.id).slice(-6)}`;
-  const jadwal = `${order.datePretty} • ${order.time} WIB`;
-  const statusPembayaran =
-    order.paymentStatus === 'Lunas' ||
-    order.status === 'Verified' ||
-    order.status === 'Completed'
-      ? 'Lunas'
-      : 'Menunggu Konfirmasi';
-  const totalBiaya = formatRupiah(order.total);
-  const customerTarget = normalizePhoneDigits(order.wa) || order.wa;
-
-  const healthNoteLine = order.healthNote?.trim()
-    ? `\n- Catatan Keluhan: ${order.healthNote.trim()}`
-    : '';
-
-  const customerMessage = `Halo ${order.customer}! Terima kasih telah melakukan reservasi di Griya Ayu Sport Massage & SPA.
-
-Detail Reservasi Anda:
-- Kode Booking: ${bookingCode}
-- Layanan: ${order.items}${healthNoteLine}
-- Tanggal & Waktu: ${jadwal}
-- Status Pembayaran: ${statusPembayaran}
-- Total: ${totalBiaya}
-
-Mohon hadir 10 menit sebelum jadwal. Jika ada pertanyaan atau perubahan jadwal, silakan balas pesan ini. Terima kasih!`;
-
-  const adminTarget = normalizePhoneDigits(adminPhone) || GRIYA_AYU_ADMIN_PHONE;
-  const adminMessage = `Halo Admin Griya Ayu! Ada pesanan baru masuk:
-
-- Kode Booking: ${bookingCode}
-- Pelanggan: ${order.customer} (${customerTarget})
-- Layanan: ${order.items}${healthNoteLine}
-- Tanggal & Waktu: ${jadwal}
-- Metode: ${order.payMethod}
-- Status Pembayaran: ${statusPembayaran}
-- Total: ${totalBiaya}`;
-
-  try {
-    const response = await fetch(
-      '/wa-api/api/send-message',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          target: customerTarget,
-          message: customerMessage,
-        }),
-      }
-    );
-
-    const data = await response.json().catch(() => null);
-
-    // Kirim notifikasi ringkas ke nomor WhatsApp Admin Griya Ayu
-    if (adminTarget && adminTarget !== customerTarget) {
-      void fetch(
-        '/wa-api/api/send-message',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            target: adminTarget,
-            message: adminMessage,
-          }),
-        }
-      ).catch(() => null);
-    }
-
-    if (!response.ok || (data && (data.status === false || data.success === false))) {
-      return {
-        ok: false,
-        detail:
-          data?.error ||
-          data?.reason ||
-          data?.detail ||
-          data?.message ||
-          'Gagal mengirim konfirmasi booking ke WhatsApp Gateway.',
-        data,
-      };
-    }
-
-    return {
-      ok: true,
-      detail: 'Konfirmasi reservasi berhasil dikirim ke WhatsApp pelanggan & Admin!',
-      data,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      detail:
-        error instanceof Error
-          ? error.message
-          : 'Gagal menghubungi server WhatsApp Gateway.',
-    };
-  }
+  const isPending =
+    order.paymentStatus === 'Pending' || order.status === 'Pending_Payment';
+  return sendBookingStatusWhatsApp(
+    order,
+    isPending ? 'pending' : 'lunas',
+    { adminPhone }
+  );
 }
 
 /**
- * Mengirim notifikasi WhatsApp otomatis ke pelanggan dan Admin Griya Ayu
+ * Mengirim notifikasi WhatsApp otomatis ke pelanggan
  * saat terjadi pembatalan booking atau proses refund.
  */
 export async function sendCancellationOrRefundWhatsApp(
   order: BookingOrder,
   adminPhone: string = GRIYA_AYU_ADMIN_PHONE
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
-  const bookingCode = `GA-${String(order.id).slice(-6)}`;
-  const jadwalAwal = `${order.datePretty} • ${order.time} WIB`;
-  const statusRefund =
-    order.status === 'Refund_Completed'
-      ? 'Dana Dikembalikan ke Rekening Asal'
-      : 'Diproses';
-  const customerTarget = normalizePhoneDigits(order.wa) || order.wa;
-
-  const customerMessage = `Halo ${order.customer}, reservasi Anda di Griya Ayu Sport Massage & SPA dengan kode booking ${bookingCode} telah berhasil dibatalkan.
-
-Detail:
-- Layanan: ${order.items}
-- Jadwal Awal: ${jadwalAwal}
-- Status Refund: ${statusRefund}
-
-Jika ada kendala terkait pengembalian dana, silakan hubungi admin kami dengan membalas pesan ini. Terima kasih.`;
-
-  const adminTarget = normalizePhoneDigits(adminPhone) || GRIYA_AYU_ADMIN_PHONE;
-  const refundAccountLine =
-    order.refundRequest?.bankName && order.refundRequest?.accountNumber
-      ? `\n- Rekening Refund: ${order.refundRequest.bankName} ${order.refundRequest.accountNumber} (a.n. ${order.refundRequest.accountHolder || order.customer})`
-      : '';
-  const reasonLine = order.refundRequest?.reason
-    ? `\n- Alasan: ${order.refundRequest.reason}`
-    : '';
-
-  const adminMessage = `Halo Admin Griya Ayu! Informasi Pembatalan Booking / Refund:
-
-- Kode Booking: ${bookingCode}
-- Pelanggan: ${order.customer} (${customerTarget})
-- Layanan: ${order.items}
-- Jadwal Awal: ${jadwalAwal} (Slot Jadwal Dibuka Kembali)
-- Status Refund: ${statusRefund}${refundAccountLine}${reasonLine}`;
-
-  try {
-    const response = await fetch(
-      '/wa-api/api/send-message',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          target: customerTarget,
-          message: customerMessage,
-        }),
-      }
-    );
-
-    const data = await response.json().catch(() => null);
-
-    // Kirim salinan ringkas informasi pembatalan ke nomor WA Admin
-    if (adminTarget && adminTarget !== customerTarget) {
-      void fetch(
-        '/wa-api/api/send-message',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            target: adminTarget,
-            message: adminMessage,
-          }),
-        }
-      ).catch(() => null);
-    }
-
-    if (!response.ok || (data && (data.status === false || data.success === false))) {
-      return {
-        ok: false,
-        detail:
-          data?.error ||
-          data?.reason ||
-          data?.detail ||
-          data?.message ||
-          'Gagal mengirim notifikasi pembatalan ke WhatsApp Gateway.',
-        data,
-      };
-    }
-
-    return {
-      ok: true,
-      detail: 'Notifikasi pembatalan/refund berhasil dikirim ke WhatsApp pelanggan & Admin!',
-      data,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      detail:
-        error instanceof Error
-          ? error.message
-          : 'Gagal menghubungi server WhatsApp Gateway.',
-    };
-  }
+  return sendBookingStatusWhatsApp(order, 'batal', { adminPhone });
 }
 
 /**

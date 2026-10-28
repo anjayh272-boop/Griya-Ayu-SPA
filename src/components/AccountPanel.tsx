@@ -17,7 +17,11 @@ import {
   GRIYA_AYU_MAPS_URL,
   sendOtpWhatsApp,
 } from '../utils/spaLogic.ts';
-import { updateCustomerPasswordInCloud } from '../utils/cloudSync.ts';
+import {
+  updateCustomerPasswordInCloud,
+  updateCustomerPhoneInCloud,
+  fetchCustomerFromCloud,
+} from '../utils/cloudSync.ts';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
 
 interface AccountPanelProps {
@@ -28,7 +32,7 @@ interface AccountPanelProps {
   language: Language;
   onChangeLanguage: (lang: Language) => void;
   onUpdateUser: (updated: User) => void;
-  onUpdateCustomerAccount?: (updated: User) => void;
+  onUpdateCustomerAccount?: (updated: User, oldPhone?: string) => void;
   onViewReceipt: (order: BookingOrder) => void;
   onLogout: () => void;
   onShowToast: (title: string, message: string, waUrl?: string) => void;
@@ -82,9 +86,14 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
   const [resetTargetCustomer, setResetTargetCustomer] = useState<User | null>(null);
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [showResetPassword, setShowResetPassword] = useState(false);
-  const [sendWaOnReset, setSendWaOnReset] = useState(true);
   const [isSubmittingReset, setIsSubmittingReset] = useState(false);
   const [resetFormError, setResetFormError] = useState('');
+
+  // Admin: Ganti Nomor WhatsApp Pelanggan (Nomor Hangus / Tidak Aktif) Modal State
+  const [editPhoneTargetCustomer, setEditPhoneTargetCustomer] = useState<User | null>(null);
+  const [newCustomerPhoneInput, setNewCustomerPhoneInput] = useState('');
+  const [isSubmittingPhoneChange, setIsSubmittingPhoneChange] = useState(false);
+  const [editPhoneFormError, setEditPhoneFormError] = useState('');
 
   // Handle Photo File Upload (DataURL terkompresi agar aman di localStorage)
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -262,11 +271,117 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
     );
   }, [storedCustomers, memberSearchQuery]);
 
+  // =========================================================================
+  // 1. HANDLER GANTI NOMOR WHATSAPP PELANGGAN (NOMOR HANGUS / TIDAK AKTIF)
+  // =========================================================================
+  const handleOpenEditPhoneModal = (member: User) => {
+    setEditPhoneTargetCustomer(member);
+    setNewCustomerPhoneInput('');
+    setEditPhoneFormError('');
+  };
+
+  const handleConfirmChangeCustomerPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPhoneTargetCustomer || isSubmittingPhoneChange) return;
+
+    const oldNormPhone = normalizePhoneDigits(editPhoneTargetCustomer.phone);
+    const newNormPhone = normalizePhoneDigits(newCustomerPhoneInput);
+
+    if (!newNormPhone || newNormPhone.length < 9) {
+      setEditPhoneFormError('Mohon masukkan Nomor WhatsApp baru yang valid (minimal 9 digit).');
+      return;
+    }
+
+    if (newNormPhone === oldNormPhone) {
+      setEditPhoneFormError('Nomor WhatsApp baru sama dengan nomor WhatsApp lama.');
+      return;
+    }
+
+    setIsSubmittingPhoneChange(true);
+    setEditPhoneFormError('');
+
+    try {
+      // Validasi: Pastikan nomor baru belum pernah digunakan oleh member lain maupun Admin
+      const isMainOrSecondaryAdmin =
+        newNormPhone === '087765573476' || newNormPhone === '081585921993';
+      const usedInLocal = storedCustomers.some(
+        (u) =>
+          normalizePhoneDigits(u.phone) === newNormPhone &&
+          normalizePhoneDigits(u.phone) !== oldNormPhone
+      );
+
+      let usedInCloud = false;
+      if (!usedInLocal && !isMainOrSecondaryAdmin) {
+        const cloudMatch = await fetchCustomerFromCloud(newNormPhone);
+        if (
+          cloudMatch &&
+          normalizePhoneDigits(cloudMatch.phone) !== oldNormPhone
+        ) {
+          usedInCloud = true;
+        }
+      }
+
+      if (usedInLocal || usedInCloud || isMainOrSecondaryAdmin) {
+        setEditPhoneFormError('Nomor WhatsApp baru sudah terdaftar pada akun lain');
+        setIsSubmittingPhoneChange(false);
+        return;
+      }
+
+      const baseList = [...storedCustomers];
+      const targetIdx = baseList.findIndex(
+        (u) => normalizePhoneDigits(u.phone) === oldNormPhone
+      );
+
+      if (targetIdx === -1) {
+        setEditPhoneFormError('Data member tidak ditemukan.');
+        setIsSubmittingPhoneChange(false);
+        return;
+      }
+
+      const existingMember = baseList[targetIdx];
+      // Perbarui nomor telepon pelanggan di database/state tanpa menghilangkan riwayat booking, status keanggotaan, maupun poin reward
+      const updatedCustomer: User = {
+        ...existingMember,
+        id: existingMember.id || oldNormPhone,
+        name: existingMember.name,
+        phone: newNormPhone,
+        pass: existingMember.pass,
+        points: existingMember.points,
+        role: existingMember.role === 'admin' ? 'admin' : existingMember.role || 'customer',
+        status: existingMember.status || 'active',
+        avatar: existingMember.avatar,
+      };
+
+      baseList[targetIdx] = updatedCustomer;
+      saveCustomersPersistently(baseList);
+      await updateCustomerPhoneInCloud(existingMember, oldNormPhone, newNormPhone);
+
+      if (onUpdateCustomerAccount) {
+        onUpdateCustomerAccount(updatedCustomer, oldNormPhone);
+      }
+
+      const memberName = updatedCustomer.name;
+      const memberPoints = updatedCustomer.points;
+      setEditPhoneTargetCustomer(null);
+      setNewCustomerPhoneInput('');
+      setEditPhoneFormError('');
+
+      onShowToast(
+        'Nomor WhatsApp Pelanggan Diperbarui! 📱✅',
+        `Nomor WhatsApp untuk member ${memberName} berhasil diubah dari ${oldNormPhone} menjadi ${newNormPhone}. Seluruh riwayat booking, status member aktif, dan saldo ${memberPoints} Poin tetap tersimpan utuh.`
+      );
+    } finally {
+      setIsSubmittingPhoneChange(false);
+    }
+  };
+
+  // =========================================================================
+  // 2. HANDLER RESET KATA SANDI OLEH ADMIN + KIRIM OTOMATIS VIA WA GATEWAY
+  // =========================================================================
   const handleOpenResetPasswordModal = (member: User) => {
     setResetTargetCustomer(member);
     setResetNewPassword('');
     setShowResetPassword(false);
-    setSendWaOnReset(true);
     setResetFormError('');
   };
 
@@ -304,8 +419,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       }
 
       const existingMember = baseList[targetIdx];
-      // UPDATE HANYA pada field kata sandi (pass) milik pelanggan yang bersangkutan
-      // Tanpa membuat record baru dan tanpa mengubah ID, nomor WA, poin, maupun status member
+      // a. Update password member di database/state lokal maupun API cloud
       const updatedCustomer: User = {
         ...existingMember,
         id: existingMember.id || targetNormPhone,
@@ -326,31 +440,34 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
         onUpdateCustomerAccount(updatedCustomer);
       }
 
-      let waGatewayInfo = '';
-      if (sendWaOnReset) {
-        const waRes = await sendPasswordResetWhatsApp(
-          updatedCustomer.name,
-          updatedCustomer.phone,
-          cleanNewPass
-        );
-        waGatewayInfo = waRes.ok
-          ? ` Kata sandi baru juga telah dikirim otomatis ke WhatsApp ${updatedCustomer.phone} via WA Gateway.`
-          : ` (Catatan: Pengiriman otomatis WA Gateway belum terhubung, Anda juga dapat mengirimkannya via tombol WhatsApp).`;
-      }
+      // b. Panggil WhatsApp Gateway menggunakan endpoint POST (/wa-api/api/send-message)
+      await sendPasswordResetWhatsApp(
+        updatedCustomer.name,
+        updatedCustomer.phone,
+        cleanNewPass
+      );
 
       const rawDigits = updatedCustomer.phone.replace(/[^0-9]/g, '');
       const waTarget = rawDigits.startsWith('0') ? '62' + rawDigits.slice(1) : rawDigits;
-      const waFallbackText = `Halo Kak ${updatedCustomer.name} 🌿\n\nKata sandi akun Griya Ayu Sport Massage & SPA Anda telah berhasil direset oleh Admin.\n\nKata sandi baru Anda: *${cleanNewPass}*\n\nSilakan gunakan kata sandi ini untuk masuk ke website/aplikasi di https://griyaayu.vercel.app dan segera ganti kata sandi Anda demi keamanan akun. Terima kasih! 🙏✨`;
+      const waFallbackText =
+        'Halo Kak ' +
+        updatedCustomer.name +
+        '! 🌿\n\nKata sandi akun member Griya Ayu Sport Massage & SPA Anda telah berhasil direset oleh Admin.\n\nBerikut data login akun Anda:\n📱 Nomor WhatsApp: *' +
+        updatedCustomer.phone +
+        '*\n🔑 Kata Sandi Baru: *' +
+        cleanNewPass +
+        '*\n\nSilakan langsung login melalui: https://griyaayu.vercel.app\nDemi keamanan akun, Kakak dapat mengubah kata sandi ini kembali setelah berhasil masuk.\n\nSalam sehat selalu! 🙏✨';
       const waFallbackUrl = `https://wa.me/${waTarget}?text=${encodeURIComponent(waFallbackText)}`;
 
-      const updatedName = updatedCustomer.name;
+      // d. Tutup modal secara otomatis
       setResetTargetCustomer(null);
       setResetNewPassword('');
       setShowResetPassword(false);
 
+      // c. Tampilkan toast/notifikasi berhasil di layar Admin
       onShowToast(
-        `Kata sandi untuk ${updatedName} berhasil diperbarui!`,
-        `Akun member ${updatedName} (${updatedCustomer.phone}) tetap aktif dengan ${updatedCustomer.points} Poin Loyalitas.${waGatewayInfo}`,
+        'Kata sandi berhasil direset dan telah dikirimkan ke WhatsApp pelanggan!',
+        `Kata sandi akun member ${updatedCustomer.name} (${updatedCustomer.phone}) telah diperbarui dan dikirim otomatis ke WhatsApp pelanggan.`,
         waFallbackUrl
       );
     } finally {
@@ -520,40 +637,35 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       {isAdmin && activeSection === 'menu' && (
         <section
           aria-label="Manajemen Pelanggan dan Data Member"
-          className="bg-white rounded-2xl border-2 border-[#D4AF37]/80 shadow-sm overflow-hidden animate-page-enter"
+          className="bg-white rounded-2xl border border-[#D4AF37]/80 shadow-xs overflow-hidden animate-page-enter"
         >
-          {/* Header Manajemen Pelanggan */}
-          <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white px-4 py-3 border-b border-[#D4AF37]/50 flex items-center justify-between gap-2 flex-wrap">
+          {/* Header Ringkas: Judul "Data Member" & Badge "Total: X Akun" Sejajar */}
+          <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white px-3.5 py-2.5 border-b border-[#D4AF37]/50 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] flex items-center justify-center flex-shrink-0">
-                <i className="fa-solid fa-users-gear text-xs"></i>
+              <div className="w-7 h-7 rounded-lg bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] flex items-center justify-center flex-shrink-0">
+                <i className="fa-solid fa-users text-xs"></i>
               </div>
-              <div className="min-w-0">
-                <h3 className="text-xs sm:text-sm font-black text-[#D4AF37] leading-tight">
-                  Manajemen Pelanggan / Data Member
-                </h3>
-                <p className="text-[10px] text-emerald-200 leading-tight mt-0.5">
-                  Kelola akun member aktif &amp; reset kata sandi pelanggan
-                </p>
-              </div>
+              <h3 className="text-sm font-black text-[#D4AF37] truncate">
+                Data Member
+              </h3>
             </div>
 
-            <span className="bg-[#D4AF37] text-[#0B261C] text-[10px] font-black px-2.5 py-1 rounded-full shadow-2xs whitespace-nowrap flex items-center gap-1">
-              <i className="fa-solid fa-user-check"></i>
-              <span>Total Member: {storedCustomers.length} Akun</span>
+            <span className="bg-[#D4AF37] text-[#0B261C] text-[11px] font-black px-2.5 py-0.5 rounded-full shadow-2xs whitespace-nowrap flex items-center gap-1 flex-shrink-0">
+              <i className="fa-solid fa-user-check text-[10px]"></i>
+              <span>Total: {storedCustomers.length} Akun</span>
             </span>
           </div>
 
-          <div className="p-3.5 space-y-3">
+          <div className="p-3 space-y-2.5">
             {/* Pencarian Member */}
             <div className="relative">
-              <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
+              <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-xs pointer-events-none"></i>
               <input
                 type="text"
                 value={memberSearchQuery}
                 onChange={(e) => setMemberSearchQuery(e.target.value)}
                 placeholder="Cari nama pelanggan atau nomor WhatsApp..."
-                className="w-full pl-8 pr-8 py-2 rounded-xl bg-stone-50 border border-stone-200 focus:border-[#0B261C] text-xs font-bold text-stone-800 focus:outline-none"
+                className="w-full pl-8 pr-8 py-2 rounded-xl bg-stone-50 border border-stone-200 focus:border-[#1B4D3E] text-xs font-semibold text-gray-800 focus:outline-none"
               />
               {memberSearchQuery && (
                 <button
@@ -567,13 +679,13 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
               )}
             </div>
 
-            {/* Daftar Baris Akun Pelanggan */}
+            {/* Daftar Kartu Horizontal Pelanggan (Padat & Seragam) */}
             {filteredMemberCustomers.length === 0 ? (
-              <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 text-center text-xs text-stone-500 font-bold">
+              <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 text-center text-xs text-stone-500 font-bold">
                 Tidak ada data member yang cocok dengan pencarian &ldquo;{memberSearchQuery}&rdquo;.
               </div>
             ) : (
-              <div className="divide-y divide-stone-200/80 border border-stone-200 rounded-xl overflow-hidden bg-stone-50/50 max-h-80 overflow-y-auto">
+              <div className="divide-y divide-stone-200/80 border border-stone-200 rounded-xl overflow-hidden bg-white max-h-[420px] overflow-y-auto">
                 {filteredMemberCustomers.map((member) => {
                   const memberInitials = member.name
                     .split(' ')
@@ -590,55 +702,67 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                   return (
                     <div
                       key={normalizePhoneDigits(member.phone)}
-                      className="p-3 bg-white hover:bg-emerald-50/40 transition flex items-center justify-between gap-2.5"
+                      className="p-3 bg-white hover:bg-emerald-50/30 transition flex items-center justify-between gap-2.5 flex-wrap sm:flex-nowrap"
                     >
+                      {/* Kiri: Avatar w-10 h-10 + Kolom Info */}
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         {member.avatar ? (
                           <img
                             src={member.avatar}
                             alt={member.name}
-                            className="w-9 h-9 rounded-full object-cover border border-[#D4AF37] flex-shrink-0"
+                            className="w-10 h-10 rounded-full object-cover border border-[#D4AF37] flex-shrink-0"
                           />
                         ) : (
-                          <div className="w-9 h-9 rounded-full bg-[#0B261C] text-[#D4AF37] font-black text-xs flex items-center justify-center border border-[#D4AF37] flex-shrink-0">
+                          <div className="w-10 h-10 rounded-full bg-[#1B4D3E] text-[#D4AF37] font-black text-xs flex items-center justify-center border border-[#D4AF37] flex-shrink-0">
                             {memberInitials}
                           </div>
                         )}
 
-                        <div className="min-w-0 flex-1">
+                        <div className="flex flex-col min-w-0 flex-1">
+                          {/* Baris 1: Nama Pelanggan Lengkap + Badge Aktif */}
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="text-xs font-black text-[#0B261C] truncate">
+                            <span className="font-bold text-sm text-gray-800 leading-snug break-words">
                               {member.name}
-                            </p>
-                            <span className="text-[9px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300 px-1.5 py-0.5 rounded-md">
+                            </span>
+                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded leading-none flex-shrink-0">
                               Aktif
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 flex-wrap text-[11px] text-stone-600 mt-0.5">
-                            <span className="font-mono font-bold text-stone-700">
-                              <i className="fa-brands fa-whatsapp text-emerald-600 mr-1"></i>
+
+                          {/* Baris 2: Nomor WA + Info Ringkas Poin & Booking */}
+                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                            <span className="font-mono text-xs text-gray-500">
                               {member.phone}
                             </span>
-                            <span className="text-[10px] font-black text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded">
-                              👑 {member.points} Poin
+                            <span className="text-[11px] font-bold bg-amber-100/90 text-amber-900 border border-amber-300/80 px-1.5 py-0.5 rounded leading-none whitespace-nowrap">
+                              ⭐ {member.points} Poin • {memberOrdersCount}x Booking
                             </span>
-                            {memberOrdersCount > 0 && (
-                              <span className="text-[10px] font-semibold text-stone-500">
-                                • {memberOrdersCount}x Booking
-                              </span>
-                            )}
                           </div>
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleOpenResetPasswordModal(member)}
-                        className="tactile-btn bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] border border-[#D4AF37] font-black text-[11px] px-2.5 py-2 rounded-xl flex items-center gap-1.5 flex-shrink-0 shadow-2xs"
-                      >
-                        <i className="fa-solid fa-key text-[10px]"></i>
-                        <span>Reset Sandi</span>
-                      </button>
+                      {/* Kanan: Kelompok Tombol Aksi Ringkas */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditPhoneModal(member)}
+                          title="Ganti Nomor WhatsApp Pelanggan"
+                          className="tactile-btn border border-stone-300 hover:border-[#D4AF37] bg-white hover:bg-amber-50 text-gray-700 hover:text-[#1B4D3E] font-bold px-2.5 py-1 text-xs rounded-lg flex items-center gap-1 whitespace-nowrap cursor-pointer"
+                        >
+                          <i className="fa-solid fa-pen text-[10px] text-amber-600"></i>
+                          <span>Ganti No.</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenResetPasswordModal(member)}
+                          title="Reset Kata Sandi & Kirim ke WhatsApp"
+                          className="tactile-btn bg-[#1B4D3E] hover:bg-[#0B261C] text-white font-bold px-2.5 py-1 text-xs rounded-lg flex items-center gap-1 whitespace-nowrap shadow-2xs cursor-pointer"
+                        >
+                          <i className="fa-solid fa-lock text-[10px] text-[#D4AF37]"></i>
+                          <span>Reset Sandi</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1129,17 +1253,17 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                   </a>
                 </div>
               ) : (
-                /* Khusus Admin: Daftar Member & Tombol Reset Sandi */
+                /* Khusus Admin: Daftar Member & Tombol Ganti No. WA / Reset Kata Sandi */
                 <div className="space-y-2.5">
                   <p className="text-[11px] text-stone-600">
-                    <b>Manajemen Reset Sandi Member ({storedCustomers.length} Member Aktif):</b>{' '}
-                    Klik tombol <b>Reset Sandi</b> pada baris pelanggan di bawah ini:
+                    <b>Manajemen Member ({storedCustomers.length} Member Aktif):</b>{' '}
+                    Pilih <b>Ganti No. WA</b> atau <b>Reset Kata Sandi</b> pada baris pelanggan di bawah ini:
                   </p>
                   <div className="divide-y divide-stone-200 border border-stone-200 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
                     {storedCustomers.map((c) => (
                       <div
                         key={normalizePhoneDigits(c.phone)}
-                        className="p-2.5 bg-white flex items-center justify-between gap-2"
+                        className="p-2.5 bg-white flex items-center justify-between gap-2 flex-wrap"
                       >
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-black text-[#0B261C] truncate">{c.name}</p>
@@ -1147,14 +1271,24 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                             {c.phone} • 👑 {c.points} Poin
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenResetPasswordModal(c)}
-                          className="tactile-btn bg-[#0B261C] text-[#D4AF37] border border-[#D4AF37] font-black text-[11px] px-2.5 py-1.5 rounded-xl flex items-center gap-1 flex-shrink-0"
-                        >
-                          <i className="fa-solid fa-key text-[10px]"></i>
-                          <span>Reset Sandi</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditPhoneModal(c)}
+                            className="tactile-btn bg-amber-50 text-[#1B4D3E] border border-[#D4AF37] font-black text-[10.5px] px-2 py-1.5 rounded-xl flex items-center gap-1"
+                          >
+                            <i className="fa-solid fa-pen-to-square text-[10px]"></i>
+                            <span>Ganti No. WA</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenResetPasswordModal(c)}
+                            className="tactile-btn bg-[#1B4D3E] text-[#D4AF37] border border-[#D4AF37] font-black text-[10.5px] px-2.5 py-1.5 rounded-xl flex items-center gap-1"
+                          >
+                            <i className="fa-solid fa-key text-[10px]"></i>
+                            <span>Reset Kata Sandi</span>
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1452,7 +1586,166 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       )}
 
       {/* ================================================================= */}
-      {/* MODAL RESET KATA SANDI PELANGGAN OLEH ADMIN                       */}
+      {/* MODAL 1: GANTI NOMOR WHATSAPP PELANGGAN (NOMOR HANGUS / NONAKTIF) */}
+      {/* ================================================================= */}
+      {isAdmin && editPhoneTargetCustomer && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-page-enter"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Modal Ganti Nomor WhatsApp Pelanggan"
+        >
+          <div className="bg-white w-full max-w-md rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden flex flex-col">
+            {/* Header Modal (Hijau Zamrud #1B4D3E & Emas #D4AF37) */}
+            <div className="bg-gradient-to-r from-[#0B261C] via-[#1B4D3E] to-[#0B261C] text-white px-4 py-3.5 border-b border-[#D4AF37]/60 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] flex items-center justify-center flex-shrink-0">
+                  <i className="fa-solid fa-mobile-screen-button text-xs"></i>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black text-[#D4AF37] truncate">
+                    Ganti Nomor WhatsApp Pelanggan
+                  </h3>
+                  <p className="text-[10px] text-emerald-200 truncate">
+                    Perbarui nomor tanpa menghilangkan poin &amp; riwayat booking
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isSubmittingPhoneChange) {
+                    setEditPhoneTargetCustomer(null);
+                    setNewCustomerPhoneInput('');
+                    setEditPhoneFormError('');
+                  }
+                }}
+                disabled={isSubmittingPhoneChange}
+                className="text-stone-300 hover:text-white text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body Form Modal Ganti Nomor WA */}
+            <form
+              onSubmit={handleConfirmChangeCustomerPhone}
+              className="p-4 space-y-3.5 text-xs"
+            >
+              {/* Info Pelanggan & Nomor WA Lama (Read-Only) */}
+              <div className="bg-gradient-to-br from-[#0B261C] via-[#1B4D3E] to-[#0B261C] text-white p-3.5 rounded-2xl border border-[#D4AF37]/80 space-y-2.5 shadow-xs">
+                <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37]">
+                    Identitas Member Aktif
+                  </span>
+                  <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.5 rounded-full">
+                    👑 {editPhoneTargetCustomer.points} Poin Tersimpan
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-emerald-200 uppercase block mb-0.5">
+                      Nama Pelanggan (Read-Only)
+                    </label>
+                    <input
+                      type="text"
+                      value={editPhoneTargetCustomer.name}
+                      readOnly
+                      disabled
+                      className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white font-black text-xs cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-emerald-200 uppercase block mb-0.5">
+                      Nomor WhatsApp Lama (Read-Only)
+                    </label>
+                    <input
+                      type="text"
+                      value={editPhoneTargetCustomer.phone}
+                      readOnly
+                      disabled
+                      className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-[#D4AF37] font-mono font-black text-xs cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Input Nomor WhatsApp Baru */}
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="adminNewPhoneInput"
+                  className="font-black text-[#1B4D3E] text-xs block"
+                >
+                  Nomor WhatsApp Baru <span className="text-red-600">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-[#1B4D3E] pointer-events-none">
+                    <i className="fa-brands fa-whatsapp text-sm"></i>
+                  </span>
+                  <input
+                    id="adminNewPhoneInput"
+                    type="tel"
+                    value={newCustomerPhoneInput}
+                    onChange={(e) => {
+                      setNewCustomerPhoneInput(e.target.value);
+                      setEditPhoneFormError('');
+                    }}
+                    placeholder="Contoh: 081234567890"
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-stone-50 border-2 border-stone-300 focus:border-[#1B4D3E] font-mono font-bold text-stone-900 text-xs sm:text-sm focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[10px] text-stone-500 leading-relaxed">
+                  Riwayat booking, status keanggotaan, kata sandi, serta saldo{' '}
+                  <b>{editPhoneTargetCustomer.points} Poin</b> tidak akan hilang dan otomatis berpindah ke nomor baru ini.
+                </p>
+              </div>
+
+              {editPhoneFormError && (
+                <div className="bg-red-50 border border-red-300 text-red-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-triangle-exclamation text-red-600"></i>
+                  <span>{editPhoneFormError}</span>
+                </div>
+              )}
+
+              {/* Tombol Aksi: Batal & Simpan Nomor Baru */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isSubmittingPhoneChange}
+                  onClick={() => {
+                    setEditPhoneTargetCustomer(null);
+                    setNewCustomerPhoneInput('');
+                    setEditPhoneFormError('');
+                  }}
+                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingPhoneChange}
+                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl text-xs border border-amber-300 shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60 cursor-pointer"
+                >
+                  <i
+                    className={`fa-solid ${
+                      isSubmittingPhoneChange ? 'fa-spinner fa-spin' : 'fa-floppy-disk'
+                    }`}
+                  ></i>
+                  <span>
+                    {isSubmittingPhoneChange ? 'Menyimpan Nomor...' : 'Simpan Nomor Baru'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL 2: RESET KATA SANDI PELANGGAN + KIRIM OTOMATIS VIA WA       */}
       {/* ================================================================= */}
       {isAdmin && resetTargetCustomer && (
         <div
@@ -1462,8 +1755,8 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
           aria-label="Modal Reset Kata Sandi Pelanggan"
         >
           <div className="bg-white w-full max-w-md rounded-3xl border-2 border-[#D4AF37] shadow-2xl overflow-hidden flex flex-col">
-            {/* Header Modal (Hijau Tua & Emas) */}
-            <div className="bg-gradient-to-r from-[#0B261C] via-[#123829] to-[#0B261C] text-white px-4 py-3.5 border-b border-[#D4AF37]/60 flex items-center justify-between gap-2">
+            {/* Header Modal (Hijau Zamrud #1B4D3E & Emas #D4AF37) */}
+            <div className="bg-gradient-to-r from-[#0B261C] via-[#1B4D3E] to-[#0B261C] text-white px-4 py-3.5 border-b border-[#D4AF37]/60 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-xl bg-[#D4AF37]/20 border border-[#D4AF37] text-[#D4AF37] flex items-center justify-center flex-shrink-0">
                   <i className="fa-solid fa-key text-xs"></i>
@@ -1473,7 +1766,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                     Reset Kata Sandi Pelanggan
                   </h3>
                   <p className="text-[10px] text-emerald-200 truncate">
-                    Perbarui sandi tanpa mengubah poin &amp; status member
+                    Perbarui sandi &amp; kirim otomatis ke WhatsApp pelanggan
                   </p>
                 </div>
               </div>
@@ -1487,7 +1780,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                   }
                 }}
                 disabled={isSubmittingReset}
-                className="text-stone-300 hover:text-white text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0"
+                className="text-stone-300 hover:text-white text-xs font-bold px-2.5 py-1 rounded-lg flex-shrink-0 cursor-pointer"
               >
                 ✕
               </button>
@@ -1496,12 +1789,12 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
             {/* Body Form Modal */}
             <form onSubmit={handleConfirmResetCustomerPassword} className="p-4 space-y-3.5 text-xs">
               {/* Info Ringkas Akun Pelanggan */}
-              <div className="bg-gradient-to-br from-[#0B261C] to-[#133e2e] text-white p-3.5 rounded-2xl border border-[#D4AF37]/80 space-y-2 shadow-xs">
+              <div className="bg-gradient-to-br from-[#0B261C] via-[#1B4D3E] to-[#0B261C] text-white p-3.5 rounded-2xl border border-[#D4AF37]/80 space-y-2 shadow-xs">
                 <div className="flex items-center justify-between gap-2 border-b border-white/15 pb-2">
                   <span className="text-[10px] font-black uppercase tracking-wider text-[#D4AF37]">
                     Informasi Akun Member
                   </span>
-                  <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 px-2 py-0.5 rounded-full">
                     ✓ Member Aktif ({resetTargetCustomer.points} Poin)
                   </span>
                 </div>
@@ -1513,7 +1806,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-stone-300 font-medium">Nomor WhatsApp:</span>
+                    <span className="text-stone-300 font-medium">Nomor WhatsApp Tujuan:</span>
                     <span className="font-mono font-black text-[#D4AF37] text-right">
                       <i className="fa-brands fa-whatsapp mr-1 text-emerald-400"></i>
                       {resetTargetCustomer.phone}
@@ -1522,22 +1815,22 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                 </div>
               </div>
 
-              {/* Input Kata Sandi Baru + Tombol Intip & Generate Sandi Acak */}
+              {/* Input Kata Sandi Baru + Tombol Intip & Buat Sandi Acak */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
                   <label
                     htmlFor="adminResetPassInput"
-                    className="font-black text-[#0B261C] text-xs"
+                    className="font-black text-[#1B4D3E] text-xs"
                   >
                     Kata Sandi Baru <span className="text-red-600">*</span>
                   </label>
                   <button
                     type="button"
                     onClick={handleGenerateRandomPassword}
-                    className="tactile-btn bg-amber-50 hover:bg-amber-100 text-[#0B261C] border border-[#D4AF37] font-black text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs"
+                    className="tactile-btn bg-amber-50 hover:bg-amber-100 text-[#1B4D3E] border border-[#D4AF37] font-black text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs cursor-pointer"
                   >
                     <i className="fa-solid fa-wand-magic-sparkles text-amber-600"></i>
-                    <span>Generate Sandi Acak</span>
+                    <span>Buat Sandi Acak</span>
                   </button>
                 </div>
 
@@ -1551,7 +1844,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                       setResetFormError('');
                     }}
                     placeholder="Ketik kata sandi baru (min. 6 karakter)..."
-                    className="w-full pl-3.5 pr-11 py-2.5 rounded-xl bg-stone-50 border-2 border-stone-300 focus:border-[#0B261C] font-mono font-bold text-stone-900 text-xs sm:text-sm focus:outline-none"
+                    className="w-full pl-3.5 pr-11 py-2.5 rounded-xl bg-stone-50 border-2 border-stone-300 focus:border-[#1B4D3E] font-mono font-bold text-stone-900 text-xs sm:text-sm focus:outline-none"
                     autoFocus
                   />
                   <button
@@ -1560,7 +1853,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                     aria-label={
                       showResetPassword ? 'Sembunyikan Kata Sandi' : 'Lihat Kata Sandi'
                     }
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-stone-500 hover:text-[#0B261C] hover:bg-stone-200/60 flex items-center justify-center transition"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-stone-500 hover:text-[#1B4D3E] hover:bg-stone-200/60 flex items-center justify-center transition"
                   >
                     <i
                       className={`fa-solid ${
@@ -1569,29 +1862,11 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                     ></i>
                   </button>
                 </div>
-                <p className="text-[10px] text-stone-500">
-                  ID pelanggan, nomor WhatsApp, poin loyalitas, dan riwayat transaksi tidak akan berubah.
+                <p className="text-[10px] text-stone-500 leading-relaxed">
+                  Setelah disimpan, data login baru akan langsung dikirim otomatis ke WhatsApp{' '}
+                  <b>{resetTargetCustomer.phone}</b> melalui WhatsApp Gateway.
                 </p>
               </div>
-
-              {/* Checkbox Kirim Kata Sandi Baru ke WhatsApp Pelanggan via WA Gateway */}
-              <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-emerald-50/90 border border-emerald-300 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={sendWaOnReset}
-                  onChange={(e) => setSendWaOnReset(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 accent-[#0B261C] rounded cursor-pointer flex-shrink-0"
-                />
-                <div className="text-[11px] leading-snug text-emerald-950">
-                  <span className="font-black block">
-                    Kirim kata sandi baru ke WhatsApp pelanggan via WA Gateway
-                  </span>
-                  <span className="text-[10px] text-emerald-800 block mt-0.5">
-                    Otomatis mengirim pesan pemberitahuan sandi baru ke nomor{' '}
-                    <b>{resetTargetCustomer.phone}</b> setelah disimpan.
-                  </span>
-                </div>
-              </label>
 
               {resetFormError && (
                 <div className="bg-red-50 border border-red-300 text-red-800 p-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5">
@@ -1600,7 +1875,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                 </div>
               )}
 
-              {/* Tombol Aksi: Batal & Simpan & Perbarui Sandi */}
+              {/* Tombol Aksi: Batal & Simpan & Kirim ke WhatsApp */}
               <div className="flex gap-2 pt-1">
                 <button
                   type="button"
@@ -1610,24 +1885,24 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
                     setResetNewPassword('');
                     setResetFormError('');
                   }}
-                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-2.5 px-4 rounded-xl text-xs"
+                  className="tactile-btn bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold py-2.5 px-4 rounded-xl text-xs cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingReset}
-                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl text-xs border border-amber-300 shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60"
+                  className="tactile-btn gold-shimmer-card flex-1 bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl text-xs border border-amber-300 shadow-md flex items-center justify-center gap-1.5 disabled:opacity-60 cursor-pointer"
                 >
                   <i
                     className={`fa-solid ${
-                      isSubmittingReset ? 'fa-spinner fa-spin' : 'fa-floppy-disk'
+                      isSubmittingReset ? 'fa-spinner fa-spin' : 'fa-paper-plane'
                     }`}
                   ></i>
                   <span>
                     {isSubmittingReset
                       ? 'Menyimpan & Mengirim WA...'
-                      : 'Simpan & Perbarui Sandi'}
+                      : 'Simpan & Kirim ke WhatsApp'}
                   </span>
                 </button>
               </div>

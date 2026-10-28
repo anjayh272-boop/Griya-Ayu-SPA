@@ -5,7 +5,6 @@ import {
   formatCountdown,
   isOrderLockedStatus,
   compressImageFileToDataUrl,
-  sendBookingSummaryWhatsApp,
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_NMID,
   GRIYA_AYU_QRIS_MERCHANT,
@@ -136,15 +135,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     }
     setLocalStatus('Locked');
     const cleanHealthNote = healthNote.trim() || undefined;
-    const confirmedOrder: BookingOrder = {
-      ...order,
-      payMethodType: activeMethodType,
-      payMethod: isCashMethod ? 'Cash / Bayar di Tempat' : selectedChannel,
-      paymentStatus: isCashMethod ? 'Booking Cash (Bayar di Lokasi)' : 'Lunas',
-      status: 'Paid',
-      healthNote: cleanHealthNote || order.healthNote,
-    };
-    void sendBookingSummaryWhatsApp(confirmedOrder);
     onPaymentSuccess(
       order.id,
       activeMethodType,

@@ -32,7 +32,6 @@ import {
   getTodayIso,
   getPaymentMethodDetails,
   buildAdminWaConfirmationMessage,
-  buildCustomerToAdminRefundWaMessage,
   buildAdminApproveRefundWaMessage,
   buildAdminRejectRefundWaMessage,
   STORAGE_KEYS,
@@ -51,8 +50,7 @@ import {
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
   GRIYA_AYU_DEFAULT_THERAPIST,
-  sendBookingSummaryWhatsApp,
-  sendCancellationOrRefundWhatsApp,
+  sendBookingStatusWhatsApp,
   sendRescheduleBookingWhatsApp,
   checkBookingRescheduleEligibility,
   normalizeHomeServiceSchedule,
@@ -211,6 +209,7 @@ export default function App() {
     new Set(loadBookingsPersistently(INITIAL_BOOKINGS).map((b) => b.id))
   );
   const deletedBookingIdsRef = useRef<Set<number>>(new Set(loadDeletedBookingIds()));
+  const replacedCustomerPhonesRef = useRef<Set<string>>(new Set());
   const knownCloudBookingIdsRef = useRef<Set<number>>(new Set());
   const knownCloudNotifIdsRef = useRef<Set<number>>(new Set());
   const initialCloudBookingsSyncedRef = useRef<boolean>(false);
@@ -324,16 +323,22 @@ export default function App() {
           const mapByPhone = new Map<string, User>();
           const missingInCloud: User[] = [];
 
-          // Utamakan data dari Cloud
+          // Utamakan data dari Cloud (abaikan nomor lama yang baru saja diganti oleh Admin)
           cloudCustomers.forEach((cu) => {
             const key = normalizePhoneDigits(cu.phone);
-            if (key) mapByPhone.set(key, cu);
+            if (key && !replacedCustomerPhonesRef.current.has(key)) {
+              mapByPhone.set(key, cu);
+            }
           });
 
           // Jika ada data di perangkat lokal yang belum pernah terunggah ke Cloud, migrasikan otomatis
           prevLocal.forEach((lu) => {
             const key = normalizePhoneDigits(lu.phone);
-            if (key && !mapByPhone.has(key)) {
+            if (
+              key &&
+              !mapByPhone.has(key) &&
+              !replacedCustomerPhonesRef.current.has(key)
+            ) {
               mapByPhone.set(key, lu);
               missingInCloud.push(lu);
             }
@@ -802,12 +807,23 @@ export default function App() {
     }
   };
 
-  const handleUpdateCustomerAccount = (updatedCustomer: User) => {
+  const handleUpdateCustomerAccount = (updatedCustomer: User, oldPhone?: string) => {
+    const newNormPhone = normalizePhoneDigits(updatedCustomer.phone);
+    const oldNormPhone = oldPhone ? normalizePhoneDigits(oldPhone) : newNormPhone;
+    const isPhoneChanged = Boolean(oldNormPhone && newNormPhone && oldNormPhone !== newNormPhone);
+
+    if (isPhoneChanged) {
+      replacedCustomerPhonesRef.current.add(oldNormPhone);
+      replacedCustomerPhonesRef.current.delete(newNormPhone);
+    }
+
     void syncCustomerToCloud(updatedCustomer);
+
     setCustomers((prev) => {
-      const targetPhone = normalizePhoneDigits(updatedCustomer.phone);
       const idx = prev.findIndex(
-        (u) => normalizePhoneDigits(u.phone) === targetPhone
+        (u) =>
+          normalizePhoneDigits(u.phone) === oldNormPhone ||
+          normalizePhoneDigits(u.phone) === newNormPhone
       );
       const next: User[] =
         idx !== -1
@@ -816,8 +832,8 @@ export default function App() {
                 ? {
                     ...u,
                     ...updatedCustomer,
-                    id: u.id || updatedCustomer.id || targetPhone,
-                    phone: u.phone,
+                    id: u.id || updatedCustomer.id || oldNormPhone,
+                    phone: newNormPhone || updatedCustomer.phone,
                     points: updatedCustomer.points ?? u.points,
                     role: u.role === 'admin' ? 'admin' : u.role || 'customer',
                     status: u.status || 'active',
@@ -825,10 +841,44 @@ export default function App() {
                 : u
             )
           : prev;
-      const sanitized = getValidMemberCustomers(next);
+      const filtered = isPhoneChanged
+        ? next.filter(
+            (u, i) =>
+              i === idx || normalizePhoneDigits(u.phone) !== oldNormPhone
+          )
+        : next;
+      const sanitized = getValidMemberCustomers(filtered);
       saveCustomersPersistently(sanitized);
       return sanitized;
     });
+
+    // Jika nomor WhatsApp pelanggan diganti, perbarui nomor WA pada seluruh riwayat booking & notifikasi pelanggan tersebut
+    // agar riwayat pesanan dan status keanggotaan tidak hilang
+    if (isPhoneChanged) {
+      updateBookingsAndPersist((prev) =>
+        prev.map((b) =>
+          normalizePhoneDigits(b.wa) === oldNormPhone
+            ? { ...b, wa: newNormPhone }
+            : b
+        )
+      );
+
+      setNotifications((prev) => {
+        const next = prev.map((n) => {
+          if (
+            n.targetPhone &&
+            normalizePhoneDigits(n.targetPhone) === oldNormPhone
+          ) {
+            const updatedNotif = { ...n, targetPhone: newNormPhone };
+            void syncNotificationToCloud(updatedNotif);
+            return updatedNotif;
+          }
+          return n;
+        });
+        safeSaveJson(STORAGE_KEYS.NOTIFICATIONS, next);
+        return next;
+      });
+    }
   };
 
   const handleLogout = () => {
@@ -885,6 +935,9 @@ export default function App() {
     };
 
     updateBookingsAndPersist((prev) => [newPendingBooking, ...prev]);
+    void sendBookingStatusWhatsApp(newPendingBooking, 'pending', {
+      adminPhone: adminProfile?.phone,
+    });
     triggerBookingPushNotification(
       newPendingBooking.customer,
       newPendingBooking.items,
@@ -920,6 +973,7 @@ export default function App() {
               status: 'Cancelled',
             };
             void syncBookingToCloud(expiredOrder);
+            void sendBookingStatusWhatsApp(expiredOrder, 'gagal');
             return expiredOrder;
           }
           return b;
@@ -961,13 +1015,17 @@ export default function App() {
       existingOrder &&
       (existingOrder.paymentStatus === 'Gagal' || now >= existingOrder.expiresAt)
     ) {
+      const expiredOrder: BookingOrder = {
+        ...existingOrder,
+        paymentStatus: 'Gagal',
+        status: 'Cancelled',
+      };
       updateBookingsAndPersist((prev) =>
-        prev.map((b) =>
-          b.id === existingOrder.id
-            ? { ...b, paymentStatus: 'Gagal', status: 'Cancelled' }
-            : b
-        )
+        prev.map((b) => (b.id === existingOrder.id ? expiredOrder : b))
       );
+      void sendBookingStatusWhatsApp(expiredOrder, 'gagal', {
+        adminPhone: adminProfile?.phone,
+      });
       showToast(
         'Waktu Pembayaran Habis (Gagal) ⏳',
         'Batas waktu pembayaran 20 menit untuk booking ini telah berakhir sehingga pembayaran tidak dapat diproses lagi. Silakan buat booking baru.'
@@ -1057,8 +1115,10 @@ export default function App() {
     });
 
     if (draft.markAsPaid) {
-      // Kirim notifikasi konfirmasi reservasi otomatis ke WhatsApp pelanggan & Admin via WhatsApp Gateway
-      void sendBookingSummaryWhatsApp(newBooking, adminProfile?.phone);
+      // Kirim notifikasi LUNAS / TERKONFIRMASI otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+      void sendBookingStatusWhatsApp(newBooking, 'lunas', {
+        adminPhone: adminProfile?.phone,
+      });
 
       const waConfirm = buildAdminWaConfirmationMessage(newBooking);
       const adminNotif: AppNotification = {
@@ -1115,6 +1175,11 @@ export default function App() {
       );
       triggerCelebration(`Jam ${newBooking.time} Terkunci!`);
     } else if (!isUpdatingExistingPending) {
+      // Kirim notifikasi BELUM DIBAYAR (MENUNGGU PEMBAYARAN) otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+      void sendBookingStatusWhatsApp(newBooking, 'pending', {
+        adminPhone: adminProfile?.phone,
+      });
+
       const pendingNotif: AppNotification = {
         id: Date.now() + 1,
         target: 'customer',
@@ -1177,8 +1242,9 @@ export default function App() {
     }
   };
 
-  // Jika Pembayaran Gagal
+  // Jika Pembayaran Gagal / Waktu Habis
   const handlePaymentFailed = (orderId: number, methodType: PaymentMethodType) => {
+    const targetOrder = bookings.find((b) => b.id === orderId);
     updateBookingsAndPersist((prev) =>
       prev.map((b) => {
         if (b.id !== orderId) return b;
@@ -1193,6 +1259,13 @@ export default function App() {
         };
       })
     );
+    if (targetOrder) {
+      void sendBookingStatusWhatsApp(
+        { ...targetOrder, paymentStatus: 'Gagal', status: 'Cancelled' },
+        'gagal',
+        { adminPhone: adminProfile?.phone }
+      );
+    }
   };
 
   // Jika Pembayaran / Konfirmasi Booking Selesai (via Modal Pembayaran atau di dalam Struk Pending dari Bar Riwayat)
@@ -1271,8 +1344,10 @@ export default function App() {
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi konfirmasi reservasi otomatis ke WhatsApp pelanggan & Admin via WhatsApp Gateway
-    void sendBookingSummaryWhatsApp(updatedOrder, adminProfile?.phone);
+    // Kirim notifikasi LUNAS / TERKONFIRMASI otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+    void sendBookingStatusWhatsApp(updatedOrder, 'lunas', {
+      adminPhone: adminProfile?.phone,
+    });
 
     // Buat Notifikasi Otomatis untuk Admin beserta Kata-Kata Konfirmasi WA Pelanggan
     const waConfirm = buildAdminWaConfirmationMessage(updatedOrder);
@@ -1426,6 +1501,17 @@ export default function App() {
     );
 
     if (targetOrder) {
+      const verifiedOrder: BookingOrder = {
+        ...targetOrder,
+        status: 'Verified',
+        paymentStatus: 'Lunas',
+        verifiedDateIso: targetOrder.verifiedDateIso || todayIso,
+      };
+      void sendBookingStatusWhatsApp(verifiedOrder, 'lunas', {
+        adminPhone: adminProfile?.phone,
+        force: true,
+      });
+
       const confirmNotif: AppNotification = {
         id: Date.now(),
         target: 'customer',
@@ -1438,6 +1524,10 @@ export default function App() {
         orderId: targetOrder.id,
       };
       addNotificationsAndSync([confirmNotif]);
+      showToast(
+        'Pesanan Dikonfirmasi & WA Terkirim! ✅',
+        `Status reservasi #GA-${String(targetOrder.id).slice(-6)} (${targetOrder.customer}) telah ditandai LUNAS dan notifikasi WhatsApp otomatis telah dikirimkan ke nomor pelanggan.`
+      );
     }
 
     triggerCelebration('Pesanan Lunas & ACC ✓');
@@ -1530,6 +1620,11 @@ export default function App() {
       setActivePaymentOrderId(null);
     }
 
+    // Kirim notifikasi BATAL otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+    void sendBookingStatusWhatsApp(cancelledPendingOrder, 'batal', {
+      adminPhone: adminProfile?.phone,
+    });
+
     const customerNotif: AppNotification = {
       id: Date.now() + 1,
       target: 'customer',
@@ -1606,8 +1701,10 @@ export default function App() {
         prev.map((b) => (b.id === orderId ? cancelledCashOrder : b))
       );
 
-      // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan & salinan ringkas ke WA Admin
-      void sendCancellationOrRefundWhatsApp(cancelledCashOrder, adminProfile?.phone);
+      // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+      void sendBookingStatusWhatsApp(cancelledCashOrder, 'batal', {
+        adminPhone: adminProfile?.phone,
+      });
 
       const adminNotif: AppNotification = {
         id: Date.now() + 1,
@@ -1655,10 +1752,10 @@ export default function App() {
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi pembatalan & proses refund otomatis ke WhatsApp pelanggan & salinan ringkas ke WA Admin
-    void sendCancellationOrRefundWhatsApp(updatedOrder, adminProfile?.phone);
-
-    const waToAdminUrl = buildCustomerToAdminRefundWaMessage(updatedOrder);
+    // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+    void sendBookingStatusWhatsApp(updatedOrder, 'batal', {
+      adminPhone: adminProfile?.phone,
+    });
 
     const adminNotif: AppNotification = {
       id: Date.now() + 1,
@@ -1699,8 +1796,7 @@ export default function App() {
     triggerCelebration(`Slot ${updatedOrder.time} Terbuka!`);
     showToast(
       'Booking Dibatalkan & Pengajuan Refund Terkirim! ⏳',
-      `Jadwal jam ${updatedOrder.time} WIB kini kembali tidak terkunci dan pengajuan refund ke rekening ${refundInfo.bankName} (${refundInfo.accountNumber}) telah masuk ke Dashboard Admin. Klik tombol WhatsApp di bawah untuk mengirim pesan refund ke Admin.`,
-      waToAdminUrl
+      `Jadwal jam ${updatedOrder.time} WIB kini kembali tidak terkunci dan pengajuan refund ke rekening ${refundInfo.bankName} (${refundInfo.accountNumber}) telah masuk ke Dashboard Admin. Notifikasi pembatalan juga telah dikirim otomatis ke WhatsApp Anda.`
     );
   };
 
@@ -1755,8 +1851,11 @@ export default function App() {
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi refund selesai otomatis ke WhatsApp pelanggan & salinan ringkas ke WA Admin
-    void sendCancellationOrRefundWhatsApp(updatedOrder, adminProfile?.phone);
+    // Kirim notifikasi pembatalan/refund otomatis ke WhatsApp pelanggan via WhatsApp Gateway
+    void sendBookingStatusWhatsApp(updatedOrder, 'batal', {
+      adminPhone: adminProfile?.phone,
+      force: true,
+    });
 
     const waMsg = buildAdminApproveRefundWaMessage(updatedOrder);
     const customerNotif: AppNotification = {
@@ -1866,6 +1965,12 @@ export default function App() {
         });
         saveCustomersPersistently(next);
         return next;
+      });
+    }
+
+    if (!wasAlreadyCancelledOrRefunded) {
+      void sendBookingStatusWhatsApp(targetOrder, 'batal', {
+        adminPhone: adminProfile?.phone,
       });
     }
 
@@ -2243,18 +2348,19 @@ export default function App() {
             onRejectFakePayment={(orderId, reason) => {
               const target = bookings.find((b) => b.id === orderId);
               if (!target) return;
+              const cancelledFakeOrder: BookingOrder = {
+                ...target,
+                paymentStatus: 'Gagal',
+                status: 'Cancelled',
+                refundRejectedReason: reason,
+              };
               updateBookingsAndPersist((prev) =>
-                prev.map((b) =>
-                  b.id === orderId
-                    ? {
-                        ...b,
-                        paymentStatus: 'Gagal',
-                        status: 'Cancelled',
-                        refundRejectedReason: reason,
-                      }
-                    : b
-                )
+                prev.map((b) => (b.id === orderId ? cancelledFakeOrder : b))
               );
+              void sendBookingStatusWhatsApp(cancelledFakeOrder, 'batal', {
+                adminPhone: adminProfile?.phone,
+                force: true,
+              });
               const rejectNotif: AppNotification = {
                 id: Date.now(),
                 target: 'customer',
