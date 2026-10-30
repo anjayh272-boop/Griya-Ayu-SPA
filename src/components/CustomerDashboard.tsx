@@ -294,6 +294,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       return;
     }
 
+    const isRescheduleHoliday = calendarDays.find((d) => d.iso === rescheduleDateIso)?.isHoliday;
+    if (isRescheduleHoliday) {
+      setRescheduleTimeSlot(null);
+      setRescheduleError('Tanggal ini tidak menerima reservasi (Tutup/Libur).');
+      return;
+    }
+
     if (!rescheduleTimeSlot) {
       setRescheduleError('Silakan pilih jam sesi baru yang tersedia terlebih dahulu.');
       return;
@@ -502,7 +509,34 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     nowMs,
   ]);
 
-  // Otomatis koreksi jika tanggal terpilih sudah lewat, serta reset jam jika sudah terlewat atau tidak tersedia pada mode Home Service
+  const isSelectedDateStudioHoliday = React.useMemo(() => {
+    const [y, m, d] = selectedDateIso.split('-').map(Number);
+    const dateObj = new Date(y, (m || 1) - 1, d || 1);
+    return isDateHoliday(
+      selectedDateIso,
+      dateObj.getDay(),
+      closedWeekdays,
+      closedSpecificDates
+    );
+  }, [selectedDateIso, closedWeekdays, closedSpecificDates]);
+
+  const isSelectedDateHoliday = React.useMemo(() => {
+    const matchedDay = calendarDays.find((d) => d.iso === selectedDateIso);
+    if (matchedDay) {
+      return matchedDay.isHoliday;
+    }
+    return visitType === 'home_service'
+      ? !selectedDateHomeServiceStatus.available
+      : isSelectedDateStudioHoliday;
+  }, [
+    calendarDays,
+    selectedDateIso,
+    visitType,
+    selectedDateHomeServiceStatus.available,
+    isSelectedDateStudioHoliday,
+  ]);
+
+  // Otomatis koreksi jika tanggal terpilih sudah lewat, serta reset jam jika tanggal libur, sudah terlewat, atau tidak tersedia pada mode Home Service
   useEffect(() => {
     if (isDatePast(selectedDateIso, nowMs)) {
       const firstOpen = calendarDays.find((d) => !d.isPast && !d.isHoliday);
@@ -514,6 +548,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         setSelectedDatePretty(formatDatePretty(new Date(nowMs)));
       }
       setSelectedTimeSlot(null);
+      return;
+    }
+
+    if (isSelectedDateHoliday) {
+      if (selectedTimeSlot !== null) {
+        setSelectedTimeSlot(null);
+      }
       return;
     }
 
@@ -541,6 +582,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     selectedTimeSlot,
     calendarDays,
     visitType,
+    isSelectedDateHoliday,
     selectedDateHomeServiceStatus,
     activeHomeServiceSlotsForSelectedDate,
   ]);
@@ -656,22 +698,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       );
       return;
     }
-    if (visitType === 'home_service') {
+    if (isHoliday) {
       setSelectedDateIso(iso);
       setSelectedDatePretty(pretty);
       setSelectedTimeSlot(null);
-      if (isHoliday) {
-        onShowToast(
-          'Home Service Tidak Tersedia',
-          'Maaf, layanan Home Service tidak tersedia pada hari tersebut.'
-        );
-      }
-      return;
-    }
-    if (isHoliday) {
       onShowToast(
-        isEn ? 'Closed on Selected Date' : 'Jadwal Sedang Libur',
-        `Mohon maaf, pada hari ${pretty} Griya Ayu sedang LIBUR operasional. Silakan pilih tanggal lain yang tersedia.`
+        isEn ? 'Closed on Selected Date' : 'Jadwal Tutup / Libur',
+        'Tanggal ini tidak menerima reservasi (Tutup/Libur).'
       );
       return;
     }
@@ -720,7 +753,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       );
       return;
     }
+    if (isSelectedDateHoliday) {
+      setSelectedTimeSlot(null);
+      onShowToast(
+        'Jadwal Tutup / Libur',
+        'Tanggal ini tidak menerima reservasi (Tutup/Libur).'
+      );
+      return;
+    }
     if (visitType === 'home_service' && !selectedDateHomeServiceStatus.available) {
+      setSelectedTimeSlot(null);
       onShowToast(
         'Home Service Tidak Tersedia',
         'Maaf, layanan Home Service tidak tersedia pada hari tersebut.'
@@ -783,6 +825,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       onShowToast(
         'Waktu Pembayaran 20 Menit Berakhir (Gagal) ⏳',
         'Maaf, batas waktu pembayaran 20 menit telah berakhir sehingga Anda tidak dapat melakukan pembayaran lagi pada pesanan ini. Silakan pilih jadwal kembali.'
+      );
+      return;
+    }
+
+    if (isSelectedDateHoliday) {
+      setSelectedTimeSlot(null);
+      goToStep(2);
+      onShowToast(
+        'Jadwal Tutup / Libur',
+        'Tanggal ini tidak menerima reservasi (Tutup/Libur).'
       );
       return;
     }
@@ -1787,8 +1839,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         <button
                           key={item.iso}
                           type="button"
+                          aria-disabled="true"
                           onClick={() => handleDateSelect(item.iso, item.pretty, true, false)}
-                          className="flex-shrink-0 w-15 py-2 rounded-2xl border border-red-200 bg-red-50/80 text-red-400 flex flex-col items-center justify-center cursor-not-allowed"
+                          className={`flex-shrink-0 w-15 py-2 rounded-2xl border flex flex-col items-center justify-center cursor-not-allowed transition ${
+                            isSelected
+                              ? 'border-red-500 bg-red-100/90 text-red-700 ring-2 ring-red-300'
+                              : 'border-red-200 bg-red-50/80 text-red-400 opacity-85'
+                          }`}
                         >
                           <span className="text-xs font-extrabold uppercase">{item.dayName}</span>
                           <span className="text-base font-black leading-tight my-0.5 line-through">
@@ -1860,32 +1917,35 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                         ? 'Select Session Time'
                         : 'Pilih Jam Sesi'}
                     </h2>
-                    {visitType === 'home_service' && selectedDateHomeServiceStatus.available && (
-                      <p className="text-[11px] font-bold text-amber-800 mt-0.5">
-                        🚗 Jam Operasional Hari {selectedDateHomeServiceStatus.daySchedule.dayName}:{' '}
-                        {selectedDateHomeServiceStatus.daySchedule.openTime} –{' '}
-                        {selectedDateHomeServiceStatus.daySchedule.closeTime} WIB
-                      </p>
-                    )}
+                    {visitType === 'home_service' &&
+                      !isSelectedDateHoliday &&
+                      selectedDateHomeServiceStatus.available && (
+                        <p className="text-[11px] font-bold text-amber-800 mt-0.5">
+                          🚗 Jam Operasional Hari{' '}
+                          {selectedDateHomeServiceStatus.daySchedule.dayName}:{' '}
+                          {selectedDateHomeServiceStatus.daySchedule.openTime} –{' '}
+                          {selectedDateHomeServiceStatus.daySchedule.closeTime} WIB
+                        </p>
+                      )}
                   </div>
                   <span className="bg-emerald-50 text-emerald-950 border border-emerald-200 px-2.5 py-1 rounded-xl text-xs font-black">
                     🕒 Sekarang {currentTimeHm} WIB
                   </span>
                 </div>
 
-                {/* Jika Pelanggan Memilih Home Service & Hari Tersebut Ditutup/Libur oleh Admin */}
-                {visitType === 'home_service' && !selectedDateHomeServiceStatus.available ? (
-                  <div className="bg-red-50 border-2 border-red-300 text-red-900 p-4 rounded-2xl space-y-2 text-center animate-fade">
-                    <div className="w-10 h-10 rounded-full bg-red-100 text-red-700 border border-red-300 flex items-center justify-center mx-auto text-base">
+                {/* JIKA TANGGAL TERPILIH BERSTATUS LIBUR (STUDIO MAUPUN HOME SERVICE) */}
+                {isSelectedDateHoliday ? (
+                  <div className="bg-red-50 border-2 border-red-300 text-red-900 p-4 rounded-2xl space-y-2.5 text-center animate-fade">
+                    <div className="w-11 h-11 rounded-full bg-red-100 text-red-700 border border-red-300 flex items-center justify-center mx-auto text-lg shadow-2xs">
                       <i className="fa-solid fa-calendar-xmark"></i>
                     </div>
-                    <h4 className="text-xs sm:text-sm font-black text-red-900">
-                      Maaf, layanan Home Service tidak tersedia pada hari tersebut
+                    <h4 className="text-xs sm:text-sm font-black text-red-900 uppercase tracking-wide">
+                      Jadwal Operasional Sedang Tutup / Libur
                     </h4>
-                    <p className="text-xs text-red-800 leading-relaxed">
-                      {selectedDateHomeServiceStatus.reason === 'service_disabled'
-                        ? 'Layanan Home Service sedang dinonaktifkan sementara oleh Admin karena seluruh terapis sedang penuh. Silakan pilih lokasi Di Studio atau pilih jadwal lain.'
-                        : `Jadwal layanan Home Service pada hari ${selectedDateHomeServiceStatus.daySchedule.dayName} (${selectedDatePretty}) sedang tutup/libur. Silakan pilih tanggal lain yang tersedia atau beralih ke lokasi Di Studio.`}
+                    <p className="text-xs text-red-800 font-semibold leading-relaxed">
+                      Mohon Maaf, Studio Griya Ayu Sedang Tutup / Libur pada{' '}
+                      <b>{selectedDatePretty}</b>. Silakan pilih hari lain yang tersedia untuk
+                      reservasi.
                     </p>
                   </div>
                 ) : visitType === 'home_service' &&
@@ -2005,17 +2065,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   </div>
                 )}
 
-                {/* Tombol Navigasi Bawah Langkah 2 (Sticky Saat Jam Sesi Dipilih) */}
+                {/* Tombol Navigasi Bawah Langkah 2 (Sticky Saat Jam Sesi Dipilih & Tanggal Tidak Libur) */}
                 <div
                   className={
-                    selectedTimeSlot
+                    selectedTimeSlot && !isSelectedDateHoliday
                       ? 'sticky bottom-[62px] z-30 pt-2'
                       : 'pt-3 border-t border-stone-200'
                   }
                 >
                   <div
                     className={`flex gap-2.5 ${
-                      selectedTimeSlot
+                      selectedTimeSlot && !isSelectedDateHoliday
                         ? 'bg-[#0B261C]/95 backdrop-blur-md p-2.5 rounded-2xl border-2 border-[#D4AF37] shadow-[0_12px_32px_rgba(0,0,0,0.45)]'
                         : ''
                     }`}
@@ -2031,15 +2091,28 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
                     <button
                       type="button"
+                      disabled={isSelectedDateHoliday || !selectedTimeSlot}
                       onClick={handleGoToStep3}
-                      className="tactile-btn gold-shimmer-card flex-1 min-h-[46px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-4 rounded-xl shadow-md border border-amber-200 text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+                      className={`flex-1 min-h-[46px] font-black py-2.5 px-4 rounded-xl text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 border transition ${
+                        isSelectedDateHoliday || !selectedTimeSlot
+                          ? 'bg-stone-200 text-stone-400 border-stone-300 cursor-not-allowed opacity-80 shadow-none'
+                          : 'tactile-btn gold-shimmer-card bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] shadow-md border-amber-200'
+                      }`}
                     >
                       <span>
-                        {selectedTimeSlot
+                        {isSelectedDateHoliday
+                          ? 'Tanggal Libur (Tutup)'
+                          : selectedTimeSlot
                           ? `Lanjut Pembayaran (${selectedTimeSlot})`
                           : 'Lanjut ke Pembayaran'}
                       </span>
-                      <i className="fa-solid fa-arrow-right"></i>
+                      <i
+                        className={`fa-solid ${
+                          isSelectedDateHoliday || !selectedTimeSlot
+                            ? 'fa-lock'
+                            : 'fa-arrow-right'
+                        }`}
+                      ></i>
                     </button>
                   </div>
                 </div>

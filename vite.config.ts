@@ -22,6 +22,29 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      proxy: {
+        '/api/send-message': {
+          target: 'https://guitars-insured-execute-gardening.trycloudflare.com',
+          changeOrigin: true,
+          secure: true,
+        },
+        '/api/cancel-booking': {
+          target: 'https://guitars-insured-execute-gardening.trycloudflare.com',
+          changeOrigin: true,
+          secure: true,
+        },
+        '/api/reschedule-booking': {
+          target: 'https://guitars-insured-execute-gardening.trycloudflare.com',
+          changeOrigin: true,
+          secure: true,
+        },
+        '/wa-api': {
+          target: 'https://guitars-insured-execute-gardening.trycloudflare.com',
+          changeOrigin: true,
+          secure: true,
+          rewrite: (p) => p.replace(/^\/wa-api/, ''),
+        },
+      },
     },
   };
 });

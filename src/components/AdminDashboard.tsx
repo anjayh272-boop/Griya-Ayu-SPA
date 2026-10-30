@@ -38,6 +38,10 @@ import {
 } from '../data/mockData.ts';
 import { AccountPanel } from './AccountPanel.tsx';
 import { GriyaAyuLogo } from './GriyaAyuLogo.tsx';
+import {
+  triggerWhatsApp,
+  buildBookingReceiptWaMessage,
+} from '../services/whatsapp.ts';
 
 interface AdminDashboardProps {
   currentUser: User;
@@ -71,6 +75,13 @@ interface AdminDashboardProps {
     paymentChannel?: string
   ) => void;
   onRejectFakePayment?: (orderId: number, reason: string) => void;
+  onCancelBooking?: (orderId: number, reason?: string) => void;
+  onRescheduleBooking?: (
+    orderId: number,
+    newDateIso: string,
+    newDatePretty: string,
+    newTimeSlot: string
+  ) => void;
   onDeleteBooking?: (orderId: number) => void;
   onToggleWeekdayHoliday: (dayIdx: number) => void;
   onToggleCustomHolidayDate: (dateIso: string) => void;
@@ -115,6 +126,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onRejectRefund,
   onUpdateBookingProof,
   onRejectFakePayment,
+  onCancelBooking,
+  onRescheduleBooking,
   onDeleteBooking,
   onToggleWeekdayHoliday,
   onToggleCustomHolidayDate,
@@ -157,6 +170,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   );
   const [newHsSlotInput, setNewHsSlotInput] = useState<string>('10:00');
   const [hasUnsavedHsChanges, setHasUnsavedHsChanges] = useState<boolean>(false);
+  const [adminRescheduleOrderId, setAdminRescheduleOrderId] = useState<number | null>(null);
+  const [adminRescheduleDate, setAdminRescheduleDate] = useState<string>(() => getTodayIso());
+  const [adminRescheduleTime, setAdminRescheduleTime] = useState<string>('10:00');
+  const [adminCancelOrderId, setAdminCancelOrderId] = useState<number | null>(null);
+  const [adminCancelReason, setAdminCancelReason] = useState<string>(
+    'Dibatalkan oleh Admin Griya Ayu'
+  );
 
   useEffect(() => {
     if (homeServiceSchedule) {
@@ -1909,7 +1929,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             className="tactile-btn gold-shimmer-card w-full min-h-[44px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#C59B27] text-[#0B261C] font-black py-2.5 px-3 rounded-xl text-xs border border-amber-300 shadow-sm flex items-center justify-center gap-2 text-center"
                           >
                             <i className="fa-solid fa-money-bill-wave text-emerald-900 text-sm"></i>
-                            <span>Konfirmasi Pesanan / Tandai Lunas & Kirim WA Otomatis</span>
+                            <span>Konfirmasi Pembayaran / Tandai Lunas</span>
                           </button>
                         ) : !isConfirmedAcc && !isCompleted ? (
                           <button
@@ -1918,7 +1938,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             className="tactile-btn w-full min-h-[42px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2.5 px-3 rounded-xl text-xs shadow-sm flex items-center justify-center gap-2 text-center"
                           >
                             <i className="fa-brands fa-whatsapp text-sm"></i>
-                            <span>Konfirmasi Pesanan / Tandai Lunas (Kirim WA Otomatis)</span>
+                            <span>Konfirmasi Pembayaran / Tandai Lunas</span>
                           </button>
                         ) : (
                           <div className="flex items-center justify-between gap-2 flex-wrap bg-emerald-100/90 border border-emerald-300 rounded-xl px-3 py-2">
@@ -1932,7 +1952,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               className="tactile-btn bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-1.5 px-3 rounded-lg text-xs flex items-center gap-1 shadow-2xs"
                             >
                               <i className="fa-brands fa-whatsapp"></i>
-                              <span>Kirim WA</span>
+                              <span>Kirim Struk WA</span>
                             </button>
                           </div>
                         )}
@@ -1954,6 +1974,170 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         ) : (
                           <div className="text-center text-xs font-bold text-emerald-800 bg-emerald-50 py-2 rounded-xl border border-emerald-200">
                             ✓ Treatment Selesai • +{b.ptsEarned} Poin Telah Masuk ke Akun Member
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Tombol Manual Cadangan: Kirim Ulang Struk WA */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void triggerWhatsApp(b.wa, buildBookingReceiptWaMessage(b));
+                        }}
+                        className="tactile-btn w-full bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-2xs"
+                      >
+                        <i className="fa-brands fa-whatsapp text-sm"></i>
+                        <span>Kirim Ulang Struk WA</span>
+                      </button>
+                    </div>
+
+                    {/* Tombol Ganti Jadwal (Reschedule) & Batalkan Booking oleh Admin (+Otomatis WA Gateway) */}
+                    {b.status !== 'Cancelled' && !isRefundDone && !isCompleted && (
+                      <div className="pt-2 border-t border-stone-100 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          {onRescheduleBooking && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (adminRescheduleOrderId === b.id) {
+                                  setAdminRescheduleOrderId(null);
+                                } else {
+                                  setAdminRescheduleOrderId(b.id);
+                                  setAdminRescheduleDate(b.date || getTodayIso());
+                                  setAdminRescheduleTime(b.time || '10:00');
+                                  setAdminCancelOrderId(null);
+                                }
+                              }}
+                              className="tactile-btn bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-black py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5"
+                            >
+                              <i className="fa-solid fa-calendar-days text-amber-700"></i>
+                              <span>Ganti Jadwal</span>
+                            </button>
+                          )}
+
+                          {onCancelBooking && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (adminCancelOrderId === b.id) {
+                                  setAdminCancelOrderId(null);
+                                } else {
+                                  setAdminCancelOrderId(b.id);
+                                  setAdminCancelReason('Dibatalkan oleh Admin Griya Ayu');
+                                  setAdminRescheduleOrderId(null);
+                                }
+                              }}
+                              className="tactile-btn bg-red-50 hover:bg-red-100 text-red-800 border border-red-300 font-black py-2 px-2.5 rounded-xl text-[11px] flex items-center justify-center gap-1.5"
+                            >
+                              <i className="fa-solid fa-ban text-red-600"></i>
+                              <span>Batalkan Booking</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {adminRescheduleOrderId === b.id && onRescheduleBooking && (
+                          <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-3 space-y-2 text-xs">
+                            <span className="font-black text-[#0B261C] block">
+                              📅 Pilih Tanggal & Jam Baru (Otomatis Kirim WA Pelanggan):
+                            </span>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] font-bold text-stone-600 block mb-0.5">
+                                  Tanggal Baru:
+                                </label>
+                                <input
+                                  type="date"
+                                  value={adminRescheduleDate}
+                                  min={getTodayIso()}
+                                  onChange={(e) => setAdminRescheduleDate(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white font-bold text-stone-900 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-stone-600 block mb-0.5">
+                                  Jam Sesi Baru:
+                                </label>
+                                <select
+                                  value={adminRescheduleTime}
+                                  onChange={(e) => setAdminRescheduleTime(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white font-bold text-stone-900 text-xs"
+                                >
+                                  {masterTimeSlots
+                                    .filter((s) => s.active)
+                                    .map((s) => (
+                                      <option key={s.time} value={s.time}>
+                                        {s.time} WIB
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setAdminRescheduleOrderId(null)}
+                                className="tactile-btn bg-stone-200 text-stone-700 font-bold py-1.5 px-3 rounded-lg text-[11px]"
+                              >
+                                Tutup
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const parsedDate = new Date(`${adminRescheduleDate}T00:00:00`);
+                                  const prettyStr = Number.isNaN(parsedDate.getTime())
+                                    ? adminRescheduleDate
+                                    : formatDatePretty(parsedDate);
+                                  onRescheduleBooking(
+                                    b.id,
+                                    adminRescheduleDate,
+                                    prettyStr,
+                                    adminRescheduleTime
+                                  );
+                                  setAdminRescheduleOrderId(null);
+                                }}
+                                className="tactile-btn flex-1 bg-[#0B261C] text-[#D4AF37] font-black py-1.5 px-3 rounded-lg text-[11px] flex items-center justify-center gap-1.5"
+                              >
+                                <i className="fa-brands fa-whatsapp"></i>
+                                <span>Simpan Jadwal Baru & Kirim WA</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {adminCancelOrderId === b.id && onCancelBooking && (
+                          <div className="bg-red-50/90 border border-red-300 rounded-xl p-3 space-y-2 text-xs">
+                            <label className="font-black text-red-900 block text-[11px]">
+                              Alasan Pembatalan (Otomatis Dikirim ke WA Pelanggan):
+                            </label>
+                            <input
+                              type="text"
+                              value={adminCancelReason}
+                              onChange={(e) => setAdminCancelReason(e.target.value)}
+                              placeholder="Contoh: Dibatalkan atas permintaan pelanggan / jadwal penuh"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-red-300 bg-white font-bold text-stone-900 text-xs"
+                            />
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setAdminCancelOrderId(null)}
+                                className="tactile-btn bg-stone-200 text-stone-700 font-bold py-1.5 px-3 rounded-lg text-[11px]"
+                              >
+                                Batal
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onCancelBooking(b.id, adminCancelReason);
+                                  setAdminCancelOrderId(null);
+                                }}
+                                className="tactile-btn flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-1.5 px-3 rounded-lg text-[11px] flex items-center justify-center gap-1.5"
+                              >
+                                <i className="fa-brands fa-whatsapp"></i>
+                                <span>Konfirmasi Batalkan & Kirim WA</span>
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

@@ -9,7 +9,11 @@ import type {
   HomeServiceDaySchedule,
   HomeServiceScheduleConfig,
 } from '../types/index.ts';
-import { DEFAULT_HOME_SERVICE_SCHEDULE } from '../data/mockData.ts';
+import {
+  DEFAULT_HOME_SERVICE_SCHEDULE,
+  SINGLE_CATALOG,
+  PACKAGE_CATALOG,
+} from '../data/mockData.ts';
 
 export function formatRupiah(amount: number): string {
   return new Intl.NumberFormat('id-ID', {
@@ -656,6 +660,17 @@ export function downloadMonthlyRevenueCsv(
   }
 }
 
+export function formatOrderTransactionNumber(order: {
+  id: number | string;
+  transactionNumber?: string;
+}): string {
+  const raw = (order.transactionNumber || '').trim();
+  if (raw) {
+    return raw.startsWith('#') ? raw : `#${raw}`;
+  }
+  return `#GA-${String(order.id).slice(-6)}`;
+}
+
 /**
  * Pesan WhatsApp otomatis dari Pelanggan ke Admin (di Struk Digital & Selesai Booking)
  */
@@ -663,13 +678,15 @@ export function buildCustomerBookingWaToAdminMessage(order: BookingOrder): {
   text: string;
   url: string;
 } {
-  const invoiceCode = `GA-${String(order.id).slice(-6)}`;
+  const trxNumber = formatOrderTransactionNumber(order);
   const methodLabel =
-    order.payMethodType === 'qris'
+    order.paymentChannel ||
+    order.payMethod ||
+    (order.payMethodType === 'qris'
       ? 'QRIS'
       : order.payMethodType === 'cash'
       ? 'Cash / Bayar di Tempat'
-      : 'Transfer Bank (BCA / Mandiri)';
+      : 'Transfer Bank (BCA / Mandiri)');
 
   const healthNoteLine = order.healthNote?.trim()
     ? `🩺 *Catatan Keluhan / Fokus Pijat:* ${order.healthNote.trim()}\n`
@@ -678,13 +695,14 @@ export function buildCustomerBookingWaToAdminMessage(order: BookingOrder): {
   const text =
     `*BUKTI BOOKING JADWAL - GRIYA AYU SPORT MASSAGE & SPA*\n` +
     `----------------------------------------\n` +
-    `🧾 *Nomor Transaksi:* #${invoiceCode}\n` +
-    `👤 *Nama:* ${order.customer}\n` +
-    `💆‍♀️ *Layanan:* ${order.items}\n` +
+    `🧾 *Nomor Transaksi:* ${trxNumber}\n` +
+    `👤 *Nama Pelanggan:* ${order.customer}\n` +
+    `📱 *No. WhatsApp:* ${order.wa}\n` +
+    `💆‍♀️ *Layanan Terapi:* ${order.items}\n` +
     healthNoteLine +
-    `📅 *Tanggal & Jam:* ${order.datePretty} • Jam ${order.time} WIB\n` +
-    `💳 *Metode Pembayaran:* ${methodLabel} (${formatRupiah(order.total)})\n` +
-    `📌 *Status:* ${order.paymentStatus}\n` +
+    `📅 *Tanggal & Jam:* ${order.datePretty} • ${order.time} WIB\n` +
+    `💳 *Pembayaran Melalui:* ${methodLabel} (${formatRupiah(order.total)})\n` +
+    `📌 *Status Pesanan:* ${order.paymentStatus}\n` +
     `----------------------------------------\n` +
     `Halo Admin Griya Ayu, saya sudah melakukan booking jadwal melalui aplikasi. Mohon dicek dan dikonfirmasi ya, terima kasih!`;
 
@@ -695,28 +713,14 @@ export function buildCustomerBookingWaToAdminMessage(order: BookingOrder): {
 }
 
 /**
- * Pesan WhatsApp otomatis dari Admin ke Pelanggan saat klik "ACC / Verifikasi Pesanan"
+ * Pesan WhatsApp otomatis dari Admin ke Pelanggan saat klik "Konfirmasi Pembayaran / Tandai Lunas"
  */
 export function buildAdminWaConfirmationMessage(order: BookingOrder): {
   text: string;
   url: string;
 } {
-  const rawPhone = order.wa.replace(/[^0-9]/g, '');
-  const waTarget = rawPhone.startsWith('0')
-    ? '62' + rawPhone.slice(1)
-    : rawPhone.startsWith('62')
-    ? rawPhone
-    : '62' + rawPhone;
-
-  const methodShort =
-    order.payMethodType === 'qris'
-      ? 'QRIS'
-      : order.payMethodType === 'cash'
-      ? 'Cash / Bayar di Tempat'
-      : 'Transfer Bank';
-
-  const text = `Halo Kak ${order.customer}, pesanan Anda di GRIYA AYU SPORT MASSAGE & SPA untuk tanggal ${order.datePretty} jam ${order.time} WIB dengan metode ${methodShort} sudah kami VERIFIKASI / ACC. Jadwal Anda sudah terkunci. Kami tunggu kedatangannya di Griya Ayu (Perumahan Graha Cipta 5 Blok E7 No.3) maksimal 10 menit sebelum jadwal ya. Terima kasih!`;
-
+  const waTarget = formatWhatsAppGatewayTarget(order.wa);
+  const text = buildOfficialPaymentReceiptWhatsAppText(order);
   const url = `https://wa.me/${waTarget}?text=${encodeURIComponent(text)}`;
   return { text, url };
 }
@@ -1139,24 +1143,25 @@ export function checkBookingRescheduleEligibility(
 }
 
 export function buildCustomerToAdminRefundWaMessage(order: BookingOrder): string {
-  const invoiceCode = `GA-${String(order.id).slice(-6)}`;
+  const trxNumber = formatOrderTransactionNumber(order);
   const req = order.refundRequest;
   const isCash = order.payMethodType === 'cash' || req?.isCashCancellation;
 
   const text = isCash
-    ? `Halo Admin Griya Ayu, saya ingin mengonfirmasi pembatalan booking *#${invoiceCode}* (${order.items} pada ${order.datePretty} • Jam ${order.time} WIB).\n\n` +
+    ? `Halo Admin Griya Ayu, saya ingin mengonfirmasi pembatalan booking *${trxNumber}* (${order.items} pada ${order.datePretty} • Jam ${order.time} WIB).\n\n` +
+      `• *Nomor Transaksi:* ${trxNumber}\n` +
       `• *Nama Pelanggan:* ${order.customer}\n` +
       `• *Alasan Pembatalan:* ${req?.reason || '-'}\n` +
       `• *Metode:* Cash / Bayar di Tempat\n\n` +
       `Jadwal jam ${order.time} WIB telah saya batalkan (> 1 jam sebelum sesi). Terima kasih.`
-    : `Halo Admin Griya Ayu, saya ingin mengajukan refund untuk pembatalan booking *#${invoiceCode}* ke nomor rekening *${req?.bankName || 'Bank/E-Wallet'} ${req?.accountNumber || '-'}* (a.n. *${req?.accountHolder || order.customer}*).\n\n` +
+    : `Halo Admin Griya Ayu, saya ingin mengajukan refund untuk pembatalan booking *${trxNumber}* ke nomor rekening *${req?.bankName || 'Bank/E-Wallet'} ${req?.accountNumber || '-'}* (a.n. *${req?.accountHolder || order.customer}*).\n\n` +
       `*RINCIAN PEMBATALAN & REFUND:*\n` +
       `----------------------------------------\n` +
-      `🧾 *ID Pesanan:* #${invoiceCode}\n` +
+      `🧾 *Nomor Transaksi:* ${trxNumber}\n` +
       `👤 *Nama Pelanggan:* ${order.customer} (${order.wa})\n` +
-      `💆‍♀️ *Layanan:* ${order.items}\n` +
-      `📅 *Jadwal yang Dibatalkan:* ${order.datePretty} • Jam ${order.time} WIB\n` +
-      `💳 *Metode Pembayaran Awal:* ${order.payMethod}\n` +
+      `💆‍♀️ *Layanan Terapi:* ${order.items}\n` +
+      `📅 *Tanggal & Jam:* ${order.datePretty} • ${order.time} WIB\n` +
+      `💳 *Pembayaran Melalui:* ${order.paymentChannel || order.payMethod}\n` +
       `💰 *Nominal Refund:* ${formatRupiah(order.total)}\n` +
       `🏦 *Tujuan Refund:* ${req?.bankName || '-'} - ${req?.accountNumber || '-'} (a.n. ${req?.accountHolder || order.customer})\n` +
       `📝 *Alasan Pembatalan:* ${req?.reason || '-'}\n` +
@@ -1170,7 +1175,7 @@ export function buildAdminApproveRefundWaMessage(order: BookingOrder): {
   text: string;
   url: string;
 } {
-  const invoiceCode = `GA-${String(order.id).slice(-6)}`;
+  const trxNumber = formatOrderTransactionNumber(order);
   const rawPhone = order.wa.replace(/[^0-9]/g, '');
   const waTarget = rawPhone.startsWith('0')
     ? '62' + rawPhone.slice(1)
@@ -1186,11 +1191,11 @@ export function buildAdminApproveRefundWaMessage(order: BookingOrder): {
     `Kami dari *Admin Griya Ayu Sport Massage & Spa* mengabarkan bahwa pengajuan *${
       isCash ? 'Pembatalan Jadwal' : 'Pembatalan & Refund Dana'
     }* Kakak telah *DISETUJUI & SELESAI DIPROSES*:\n\n` +
-    `🧾 *No. Struk:* #${invoiceCode}\n` +
-    `💆‍♀️ *Layanan:* ${order.items}\n` +
-    `📅 *Jadwal yang Dibatalkan:* ${order.datePretty} • Jam ${order.time} WIB\n` +
+    `🧾 *Nomor Transaksi:* ${trxNumber}\n` +
+    `💆‍♀️ *Layanan Terapi:* ${order.items}\n` +
+    `📅 *Tanggal & Jam:* ${order.datePretty} • ${order.time} WIB\n` +
     (isCash
-      ? `📌 *Status:* Jadwal telah resmi dibatalkan.\n\n`
+      ? `📌 *Status Pesanan:* Jadwal telah resmi dibatalkan.\n\n`
       : `💰 *Nominal Refund:* ${formatRupiah(order.total)}\n` +
         `🏦 *Rekening Tujuan:* ${req?.bankName || '-'} - ${req?.accountNumber || '-'} (a.n. ${
           req?.accountHolder || order.customer
@@ -1211,7 +1216,7 @@ export function buildAdminRejectRefundWaMessage(
   text: string;
   url: string;
 } {
-  const invoiceCode = `GA-${String(order.id).slice(-6)}`;
+  const trxNumber = formatOrderTransactionNumber(order);
   const rawPhone = order.wa.replace(/[^0-9]/g, '');
   const waTarget = rawPhone.startsWith('0')
     ? '62' + rawPhone.slice(1)
@@ -1221,7 +1226,7 @@ export function buildAdminRejectRefundWaMessage(
 
   const text =
     `Halo Kak *${order.customer}* 🙏\n` +
-    `Kami dari *Admin Griya Ayu Sport Massage & Spa* menginformasikan bahwa pengajuan refund untuk pesanan *#${invoiceCode}* (${order.datePretty} • Jam ${order.time} WIB) *BELUM DAPAT KAMI SETUJUI / DITOLAK*.\n\n` +
+    `Kami dari *Admin Griya Ayu Sport Massage & Spa* menginformasikan bahwa pengajuan refund untuk *Nomor Transaksi ${trxNumber}* (${order.datePretty} • ${order.time} WIB) *BELUM DAPAT KAMI SETUJUI / DITOLAK*.\n\n` +
     `📌 *Catatan Admin:* ${rejectReason}\n\n` +
     `Jadwal sesi Kakak masih tetap aktif. Silakan hubungi kami atau kirimkan bukti mutasi pembayaran yang valid melalui WhatsApp ini. Terima kasih.`;
 
@@ -1290,14 +1295,70 @@ export function saveFonnteToken(token: string): string {
 export const GRIYA_AYU_DEFAULT_THERAPIST = 'Rismawati, AIFMO-P (Terapis Utama Griya Ayu)';
 
 /**
- * Mengirim pesan WhatsApp melalui endpoint proxy Vercel Rewrite
- * (/wa-api/api/send-message).
+ * Membersihkan nomor tujuan WhatsApp dari simbol/spasi dan memastikan diawali kode negara '62'
+ * (contoh: "0858-1234-5678" -> "6285812345678").
+ */
+export function formatWhatsAppGatewayTarget(targetPhone: string): string {
+  const digits = (targetPhone || '').replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0')) {
+    return '62' + digits.slice(1);
+  }
+  if (digits.startsWith('8')) {
+    return '62' + digits;
+  }
+  return digits;
+}
+
+export const WA_GATEWAY_BASE_URL = 'https://guitars-insured-execute-gardening.trycloudflare.com';
+export const WA_GATEWAY_CLOUDFLARE_URL = `${WA_GATEWAY_BASE_URL}/api/send-message`;
+export const WA_GATEWAY_CANCEL_URL = `${WA_GATEWAY_BASE_URL}/api/cancel-booking`;
+export const WA_GATEWAY_RESCHEDULE_URL = `${WA_GATEWAY_BASE_URL}/api/reschedule-booking`;
+
+/**
+ * Fungsi Pengirim Universal WhatsApp Gateway Griya Ayu Sport Massage & SPA.
+ */
+export const sendWANotification = async (
+  targetPhone: string | number | undefined | null,
+  messageText: string
+): Promise<unknown> => {
+  if (!targetPhone) return;
+  let cleaned = targetPhone.toString().replace(/[^0-9]/g, '');
+  if (cleaned.startsWith('0')) cleaned = '62' + cleaned.slice(1);
+  else if (cleaned.startsWith('8')) cleaned = '62' + cleaned;
+
+  try {
+    const res = await fetch(
+      'https://guitars-insured-execute-gardening.trycloudflare.com/api/send-message',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          target: cleaned,
+          message: messageText,
+        }),
+      }
+    );
+    const data = await res.json();
+    console.log('[WA SUCCESS]:', data);
+    return data;
+  } catch (err) {
+    console.error('[WA ERROR]:', err);
+    return null;
+  }
+};
+
+/**
+ * Mengirim pesan WhatsApp melalui endpoint WhatsApp Gateway
+ * (POST ke https://guitars-insured-execute-gardening.trycloudflare.com/api/send-message) dengan penanganan error aman (try-catch).
  */
 export async function sendWhatsAppViaVpsGateway(
   targetPhone: string,
   message: string
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
-  const cleanTarget = (targetPhone || '').replace(/[^0-9]/g, '');
+  const cleanTarget = formatWhatsAppGatewayTarget(targetPhone);
   if (!cleanTarget) {
     return {
       ok: false,
@@ -1305,17 +1366,33 @@ export async function sendWhatsAppViaVpsGateway(
     };
   }
 
+  const payload = JSON.stringify({
+    target: cleanTarget,
+    message,
+  });
+
   try {
-    const response = await fetch('/wa-api/api/send-message', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        target: cleanTarget,
-        message,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(
+        'https://guitars-insured-execute-gardening.trycloudflare.com/api/send-message',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: payload,
+        }
+      );
+    } catch {
+      response = await fetch('/wa-api/api/send-message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+      });
+    }
 
     const data = await response.json().catch(() => null);
     if (!response.ok || (data && (data.status === false || data.success === false))) {
@@ -1331,12 +1408,14 @@ export async function sendWhatsAppViaVpsGateway(
       };
     }
 
+    console.log('[WA SUCCESS]:', data);
     return {
       ok: true,
       detail: 'Pesan WhatsApp berhasil dikirim ke nomor tujuan!',
       data,
     };
   } catch (error) {
+    console.error('[WA ERROR]:', error);
     return {
       ok: false,
       detail:
@@ -1399,13 +1478,239 @@ export type BookingWaStatusType = 'pending' | 'lunas' | 'batal' | 'gagal';
 const sentBookingStatusWaKeys = new Set<string>();
 
 /**
+ * Mengekstrak informasi durasi layanan dari teks daftar layanan pada pesanan.
+ */
+export function extractOrderDurationLabel(itemsText: string): string {
+  const raw = (itemsText || '').trim();
+  if (!raw) return '60 Menit (1 Sesi)';
+
+  const allCatalog = [...SINGLE_CATALOG, ...PACKAGE_CATALOG];
+  let totalMinutes = 0;
+  let matchedCount = 0;
+
+  for (const item of allCatalog) {
+    if (raw.toLowerCase().includes(item.name.toLowerCase())) {
+      matchedCount += 1;
+      const minsMatch = item.duration.match(/(\d+)/);
+      if (minsMatch) {
+        totalMinutes += parseInt(minsMatch[1], 10);
+      }
+    }
+  }
+
+  if (totalMinutes > 0) {
+    return `${totalMinutes} Menit (${matchedCount} Sesi)`;
+  }
+
+  const inlineMatch = raw.match(/(\d+\s*Menit)/i);
+  if (inlineMatch) {
+    return inlineMatch[1];
+  }
+
+  return '60–90 Menit (1 Sesi)';
+}
+
+/**
+ * Menyusun pesan teks Struk Digital Resmi (Digital Receipt) Griya Ayu Sport Massage & SPA
+ * yang sinkron 100% dengan tampilan Struk Digital di web.
+ */
+export function buildOfficialPaymentReceiptWhatsAppText(bookingData: BookingOrder): string {
+  const trxNumber = formatOrderTransactionNumber(bookingData);
+  const isCash =
+    bookingData.payMethodType === 'cash' ||
+    bookingData.paymentStatus === 'Booking Cash (Bayar di Lokasi)';
+  const statusLabel =
+    bookingData.paymentStatus === 'Lunas' ||
+    bookingData.paymentStatus === 'Terkonfirmasi (ACC Admin)' ||
+    bookingData.paymentStatus === 'Berhasil' ||
+    (!isCash &&
+      (bookingData.status === 'Paid' ||
+        bookingData.status === 'Verified' ||
+        bookingData.status === 'Completed'))
+      ? 'LUNAS'
+      : (bookingData.paymentStatus || bookingData.status || 'BERHASIL').toUpperCase();
+  const namaPelanggan = bookingData.customer || 'Pelanggan Griya Ayu';
+  const nomorWhatsApp = bookingData.wa || '-';
+  const namaLayanan = bookingData.items || '-';
+  const tanggal = bookingData.datePretty || bookingData.date || '-';
+  const jam = bookingData.time || '-';
+  const metodePembayaran =
+    bookingData.paymentChannel ||
+    bookingData.payMethod ||
+    (isCash
+      ? 'Tunai di Kasir Studio / Terapis'
+      : bookingData.payMethodType === 'qris'
+      ? 'QRIS'
+      : 'Transfer Bank');
+  const formattedTotal = Number(bookingData.total || 0).toLocaleString('id-ID');
+
+  return (
+    '================================\n' +
+    '🧾 *STRUK DIGITAL RESMI*\n' +
+    '*GRIYA AYU SPORT MASSAGE & SPA*\n' +
+    '================================\n' +
+    '*Nomor Transaksi:* ' +
+    trxNumber +
+    '\n*Status Pesanan:* ✅ ' +
+    statusLabel +
+    '\n--------------------------------\n' +
+    '*Nama Pelanggan:* ' +
+    namaPelanggan +
+    '\n*No. WhatsApp:* ' +
+    nomorWhatsApp +
+    '\n*Layanan Terapi:* ' +
+    namaLayanan +
+    '\n*Tanggal & Jam:* ' +
+    tanggal +
+    ' • ' +
+    jam +
+    ' WIB\n*Pembayaran Melalui:* ' +
+    metodePembayaran +
+    '\n*Total:* Rp ' +
+    formattedTotal +
+    '\n================================\n' +
+    '📌 *Catatan:* Tunjukkan nomor transaksi ini kepada staf kami saat tiba di lokasi. Terima kasih! 🌿✨'
+  );
+}
+
+/**
+ * Fungsi Pengiriman Mandiri (Direct Send Receipt) ke WhatsApp Pelanggan
+ * menggunakan sendWANotification.
+ */
+export async function sendWhatsAppReceipt(
+  bookingData: BookingOrder
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const receiptText = buildOfficialPaymentReceiptWhatsAppText(bookingData);
+  const data = await sendWANotification(bookingData.wa, receiptText);
+  return {
+    ok: Boolean(data),
+    detail: data
+      ? 'Struk pemesanan resmi berhasil dikirim ke WhatsApp pelanggan!'
+      : 'Gagal menghubungi server WhatsApp Gateway.',
+    data,
+  };
+}
+
+/**
+ * Mengirim pesan pembatalan booking ke WhatsApp Pelanggan melalui endpoint /api/cancel-booking
+ * (dengan fallback otomatis ke /api/send-message).
+ */
+export async function sendCancelBookingWhatsApp(
+  booking: BookingOrder,
+  cancelReason?: string
+): Promise<{ ok: boolean; detail: string; data?: unknown }> {
+  const customerPhone = formatWhatsAppGatewayTarget(booking.wa);
+  if (!customerPhone) {
+    return {
+      ok: false,
+      detail: 'Nomor WhatsApp pelanggan tidak valid.',
+    };
+  }
+
+  const resolvedReason =
+    cancelReason?.trim() ||
+    booking.refundRequest?.reason ||
+    booking.refundRejectedReason ||
+    'Dibatalkan oleh pelanggan/admin';
+
+  console.log('[WA] Mengirim pesan pembatalan ke:', customerPhone);
+
+  const trxNumber = formatOrderTransactionNumber(booking);
+  const cancelPayload = JSON.stringify({
+    id: trxNumber,
+    transactionNumber: trxNumber,
+    customerName: booking.customer || 'Pelanggan Griya Ayu',
+    phone: customerPhone,
+    serviceName: booking.items || '-',
+    date: booking.datePretty || booking.date || '-',
+    time: booking.time || '-',
+    reason: resolvedReason,
+  });
+
+  const namaPelanggan = booking.customer || 'Pelanggan Griya Ayu';
+  const namaLayanan = booking.items || '-';
+  const tanggal = booking.datePretty || booking.date || '-';
+  const jam = booking.time || '-';
+
+  const fallbackCancelMessage =
+    '================================\n' +
+    '🚫 *PEMBATALAN RESERVASI*\n' +
+    '*GRIYA AYU SPORT MASSAGE & SPA*\n' +
+    '================================\n' +
+    '*Nomor Transaksi:* ' +
+    trxNumber +
+    '\n*Status Pesanan:* ❌ DIBATALKAN\n' +
+    '--------------------------------\n' +
+    '*Nama Pelanggan:* ' +
+    namaPelanggan +
+    '\n*Layanan Terapi:* ' +
+    namaLayanan +
+    '\n*Tanggal & Jam:* ' +
+    tanggal +
+    ' • ' +
+    jam +
+    ' WIB\n*Alasan:* ' +
+    resolvedReason +
+    '\n================================\n' +
+    '📌 *Catatan:* Reservasi Anda telah dibatalkan dan slot jadwal kembali tersedia. Terima kasih! 🌿';
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch('/wa-api/api/cancel-booking', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: cancelPayload,
+      });
+      if (response.status === 404) {
+        response = await fetch(WA_GATEWAY_CANCEL_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: cancelPayload,
+        });
+      }
+    } catch {
+      response = await fetch(WA_GATEWAY_CANCEL_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: cancelPayload,
+      });
+    }
+
+    if (response.status === 404 || !response.ok) {
+      return sendWhatsAppViaVpsGateway(customerPhone, fallbackCancelMessage);
+    }
+
+    const data = await response.json().catch(() => null);
+    if (data && (data.status === false || data.success === false)) {
+      return sendWhatsAppViaVpsGateway(customerPhone, fallbackCancelMessage);
+    }
+
+    return {
+      ok: true,
+      detail: 'Reservasi dibatalkan & konfirmasi terkirim ke WhatsApp.',
+      data,
+    };
+  } catch (err) {
+    console.error('[WA] Error cancel-booking endpoint, mencoba fallback /api/send-message:', err);
+    return sendWhatsAppViaVpsGateway(customerPhone, fallbackCancelMessage);
+  }
+}
+
+/**
  * Mengirim notifikasi WhatsApp otomatis ke pelanggan berdasarkan perubahan status booking
- * melalui endpoint WhatsApp Gateway (/wa-api/api/send-message).
+ * melalui endpoint WhatsApp Gateway (/api/send-message).
  */
 export async function sendBookingStatusWhatsApp(
   order: BookingOrder,
   statusType: BookingWaStatusType,
-  options?: { adminPhone?: string; force?: boolean }
+  options?: { adminPhone?: string; force?: boolean; reason?: string }
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
   const dedupeKey = `${order.id}:${statusType}`;
   if (order.id && !options?.force && sentBookingStatusWaKeys.has(dedupeKey)) {
@@ -1418,13 +1723,21 @@ export async function sendBookingStatusWhatsApp(
     sentBookingStatusWaKeys.add(dedupeKey);
   }
 
-  const idBooking = `#GA-${String(order.id).slice(-6)}`;
+  if (statusType === 'lunas') {
+    return sendWhatsAppReceipt(order);
+  }
+
+  if (statusType === 'batal') {
+    return sendCancelBookingWhatsApp(order, options?.reason);
+  }
+
+  const trxNumber = formatOrderTransactionNumber(order);
   const namaPelanggan = order.customer || 'Pelanggan Griya Ayu';
   const namaLayanan = order.items || '-';
   const tanggal = order.datePretty || order.date || '-';
   const jam = order.time || '-';
   const totalHarga = formatRupiah(order.total);
-  const customerTarget = normalizePhoneDigits(order.wa) || order.wa;
+  const customerTarget = formatWhatsAppGatewayTarget(order.wa);
 
   let templatePesan = '';
 
@@ -1432,50 +1745,24 @@ export async function sendBookingStatusWhatsApp(
     templatePesan =
       'Halo Kak ' +
       namaPelanggan +
-      '! 🌿\n\nTerima kasih telah melakukan reservasi di Griya Ayu Sport Massage & SPA.\n\nBerikut rincian pesanan Anda:\n📋 *ID Booking:* ' +
-      idBooking +
-      '\n💆 *Layanan:* ' +
+      '! 🌿\n\nTerima kasih telah melakukan reservasi di Griya Ayu Sport Massage & SPA.\n\nBerikut rincian pesanan Anda:\n📋 *Nomor Transaksi:* ' +
+      trxNumber +
+      '\n💆 *Layanan Terapi:* ' +
       namaLayanan +
-      '\n📅 *Jadwal:* ' +
+      '\n📅 *Tanggal & Jam:* ' +
       tanggal +
-      ' | ' +
+      ' • ' +
       jam +
-      ' WIB\n💰 *Total Tagihan:* ' +
+      ' WIB\n💰 *Total:* ' +
       totalHarga +
-      '\n\n⚠️ *Status:* *MENUNGGU PEMBAYARAN*\nMohon segera selesaikan pembayaran sesuai instruksi di web agar slot treatment Anda tidak kedaluwarsa. Abaikan jika Anda memilih pembayaran tunai di tempat.\n\nTerima kasih! 🙏✨';
-  } else if (statusType === 'lunas') {
-    templatePesan =
-      'Halo Kak ' +
-      namaPelanggan +
-      '! 🌿\n\nPembayaran/Reservasi Anda telah *TERKONFIRMASI & LUNAS*! ✅\n\nDetail Kedatangan:\n📋 *ID Booking:* ' +
-      idBooking +
-      '\n💆 *Layanan:* ' +
-      namaLayanan +
-      '\n📅 *Jadwal:* ' +
-      tanggal +
-      ' | ' +
-      jam +
-      ' WIB\n📍 *Lokasi:* Griya Ayu Sport Massage & SPA\n\n📌 *Catatan Penting:*\nHarap hadir 10–15 menit sebelum jadwal sesi dimulai. Tunjukkan pesan ini atau sebutkan ID Booking kepada staf resepsionis kami saat tiba.\n\nSampai jumpa dan nikmati kenyamanan treatment Anda! 🙏✨';
-  } else if (statusType === 'batal') {
-    templatePesan =
-      'Halo Kak ' +
-      namaPelanggan +
-      '! 🌿\n\nReservasi Anda dengan rincian berikut telah *DIBATALKAN*:\n📋 *ID Booking:* ' +
-      idBooking +
-      '\n💆 *Layanan:* ' +
-      namaLayanan +
-      '\n📅 *Jadwal:* ' +
-      tanggal +
-      ' | ' +
-      jam +
-      ' WIB\n\nJika ini adalah kekeliruan atau Kakak ingin menjadwalkan ulang treatment, silakan lakukan reservasi kembali di web resmi kami: https://griyaayu.vercel.app\n\nTerima kasih! 🙏';
+      '\n\n⚠️ *Status Pesanan:* *MENUNGGU PEMBAYARAN*\nMohon segera selesaikan pembayaran sesuai instruksi di web agar slot treatment Anda tidak kedaluwarsa. Abaikan jika Anda memilih pembayaran tunai di tempat.\n\nTerima kasih! 🙏✨';
   } else {
     templatePesan =
       'Halo Kak ' +
       namaPelanggan +
-      '! 🌿\n\nBatas waktu pembayaran untuk reservasi berikut telah berakhir (Kedaluwarsa):\n📋 *ID Booking:* ' +
-      idBooking +
-      '\n💆 *Layanan:* ' +
+      '! 🌿\n\nBatas waktu pembayaran untuk reservasi berikut telah berakhir (Kedaluwarsa):\n📋 *Nomor Transaksi:* ' +
+      trxNumber +
+      '\n💆 *Layanan Terapi:* ' +
       namaLayanan +
       '\n\nSlot jadwal telah kami lepas kembali ke sistem. Kakak dapat membuat pesanan baru kapan saja melalui web kami: https://griyaayu.vercel.app\n\nSalam sehat selalu dari Griya Ayu! 🙏✨';
   }
@@ -1506,96 +1793,149 @@ export async function sendBookingSummaryWhatsApp(
  */
 export async function sendCancellationOrRefundWhatsApp(
   order: BookingOrder,
-  adminPhone: string = GRIYA_AYU_ADMIN_PHONE
+  adminPhone: string = GRIYA_AYU_ADMIN_PHONE,
+  reason?: string
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
-  return sendBookingStatusWhatsApp(order, 'batal', { adminPhone });
+  return sendCancelBookingWhatsApp(order, reason);
 }
 
 /**
  * Mengirim notifikasi WhatsApp otomatis ke pelanggan dan Admin Griya Ayu
- * saat pelanggan melakukan ganti jadwal mandiri (Reschedule).
+ * saat pelanggan atau admin melakukan ganti jadwal (Reschedule)
+ * melalui endpoint /api/reschedule-booking (dengan fallback ke /api/send-message).
  */
 export async function sendRescheduleBookingWhatsApp(
-  order: BookingOrder,
+  updatedBookingData: BookingOrder,
+  oldBookingData?: { date?: string; datePretty?: string; time?: string },
   adminPhone: string = GRIYA_AYU_ADMIN_PHONE
 ): Promise<{ ok: boolean; detail: string; data?: unknown }> {
-  const bookingCode = `GA-${String(order.id).slice(-6)}`;
-  const jadwalBaru = `${order.datePretty} • Jam ${order.time} WIB`;
-  const customerTarget = normalizePhoneDigits(order.wa) || order.wa;
+  const customerPhone = formatWhatsAppGatewayTarget(updatedBookingData.wa);
+  if (!customerPhone) {
+    return {
+      ok: false,
+      detail: 'Nomor WhatsApp pelanggan tidak valid.',
+    };
+  }
 
-  const customerMessage = `Halo ${order.customer}, jadwal reservasi Anda di Griya Ayu (Kode: ${bookingCode}) telah berhasil diubah ke:
-- Jadwal Baru: ${jadwalBaru}
-- Layanan: ${order.items}
-Sampai jumpa di lokasi!`;
+  const bookingCode = formatOrderTransactionNumber(updatedBookingData);
+  const oldDateText =
+    oldBookingData?.datePretty ||
+    oldBookingData?.date ||
+    (updatedBookingData.previousSchedule
+      ? updatedBookingData.previousSchedule.split('•')[0]?.trim()
+      : '-');
+  const oldTimeText =
+    oldBookingData?.time ||
+    (updatedBookingData.previousSchedule
+      ? updatedBookingData.previousSchedule
+          .split('•')[1]
+          ?.replace(/Jam|WIB/gi, '')
+          .trim() || '-'
+      : '-');
+  const newDateText = updatedBookingData.datePretty || updatedBookingData.date || '-';
+  const newTimeText = updatedBookingData.time || '-';
 
-  const adminTarget = normalizePhoneDigits(adminPhone) || GRIYA_AYU_ADMIN_PHONE;
-  const adminMessage = `Halo Admin Griya Ayu! Pelanggan melakukan Reschedule (Ganti Jadwal Mandiri):
-- Kode Booking: ${bookingCode}
-- Pelanggan: ${order.customer} (${customerTarget})
-- Jadwal Awal: ${order.previousSchedule || '-'} (Dibuka Kembali)
-- Jadwal Baru: ${jadwalBaru} (Terkunci)
-- Layanan: ${order.items}`;
+  console.log('[WA] Mengirim konfirmasi jadwal baru ke:', customerPhone);
+
+  const reschedulePayload = JSON.stringify({
+    id: bookingCode,
+    transactionNumber: bookingCode,
+    customerName: updatedBookingData.customer || 'Pelanggan Griya Ayu',
+    phone: customerPhone,
+    serviceName: updatedBookingData.items || '-',
+    oldDate: oldDateText,
+    oldTime: oldTimeText,
+    newDate: newDateText,
+    newTime: newTimeText,
+  });
+
+  const customerMessage =
+    'Halo Kak ' +
+    (updatedBookingData.customer || 'Pelanggan Griya Ayu') +
+    '! 🌿\n\nJadwal reservasi Anda di *Griya Ayu Sport Massage & SPA* telah berhasil diperbarui:\n📋 *Nomor Transaksi:* ' +
+    bookingCode +
+    '\n💆 *Layanan Terapi:* ' +
+    (updatedBookingData.items || '-') +
+    '\n⏪ *Jadwal Lama:* ' +
+    oldDateText +
+    ' • ' +
+    oldTimeText +
+    ' WIB\n📅 *Jadwal Baru:* ' +
+    newDateText +
+    ' • ' +
+    newTimeText +
+    ' WIB\n\nSlot jadwal baru Anda kini telah terkunci. Sampai jumpa di lokasi! 🙏✨';
+
+  const adminTarget = formatWhatsAppGatewayTarget(adminPhone || GRIYA_AYU_ADMIN_PHONE);
+  const adminMessage =
+    'Halo Admin Griya Ayu! Terdapat pembaruan jadwal (Reschedule):\n- Nomor Transaksi: ' +
+    bookingCode +
+    '\n- Pelanggan: ' +
+    updatedBookingData.customer +
+    ' (' +
+    customerPhone +
+    ')\n- Jadwal Lama: ' +
+    oldDateText +
+    ' • Jam ' +
+    oldTimeText +
+    ' WIB (Dibuka Kembali)\n- Jadwal Baru: ' +
+    newDateText +
+    ' • Jam ' +
+    newTimeText +
+    ' WIB (Terkunci)\n- Layanan: ' +
+    updatedBookingData.items;
 
   try {
-    const response = await fetch(
-      '/wa-api/api/send-message',
-      {
+    let response: Response;
+    try {
+      response = await fetch('/wa-api/api/reschedule-booking', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          target: customerTarget,
-          message: customerMessage,
-        }),
-      }
-    );
-
-    const data = await response.json().catch(() => null);
-
-    // Kirim salinan ringkas informasi reschedule ke WA Admin
-    if (adminTarget && adminTarget !== customerTarget) {
-      void fetch(
-        '/wa-api/api/send-message',
-        {
+        body: reschedulePayload,
+      });
+      if (response.status === 404) {
+        response = await fetch(WA_GATEWAY_RESCHEDULE_URL, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            target: adminTarget,
-            message: adminMessage,
-          }),
-        }
-      ).catch(() => null);
+          body: reschedulePayload,
+        });
+      }
+    } catch {
+      response = await fetch(WA_GATEWAY_RESCHEDULE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: reschedulePayload,
+      });
     }
 
-    if (!response.ok || (data && (data.status === false || data.success === false))) {
-      return {
-        ok: false,
-        detail:
-          data?.error ||
-          data?.reason ||
-          data?.detail ||
-          data?.message ||
-          'Gagal mengirim notifikasi reschedule ke WhatsApp Gateway.',
-        data,
-      };
+    // Kirim salinan ringkas informasi reschedule ke WA Admin
+    if (adminTarget && adminTarget !== customerPhone) {
+      void sendWhatsAppViaVpsGateway(adminTarget, adminMessage).catch(() => null);
+    }
+
+    if (response.status === 404 || !response.ok) {
+      return sendWhatsAppViaVpsGateway(customerPhone, customerMessage);
+    }
+
+    const data = await response.json().catch(() => null);
+    if (data && (data.status === false || data.success === false)) {
+      return sendWhatsAppViaVpsGateway(customerPhone, customerMessage);
     }
 
     return {
       ok: true,
-      detail: 'Notifikasi pembaruan jadwal berhasil dikirim ke WhatsApp pelanggan & Admin!',
+      detail: 'Jadwal berhasil diperbarui & notifikasi WhatsApp terkirim!',
       data,
     };
-  } catch (error) {
-    return {
-      ok: false,
-      detail:
-        error instanceof Error
-          ? error.message
-          : 'Gagal menghubungi server WhatsApp Gateway.',
-    };
+  } catch (err) {
+    console.error('[WA] Error reschedule-booking endpoint, mencoba fallback /api/send-message:', err);
+    return sendWhatsAppViaVpsGateway(customerPhone, customerMessage);
   }
 }
 

@@ -68,6 +68,7 @@ export interface RefundRequestInfo {
 
 export interface BookingOrder {
   id: number;
+  transactionNumber?: string; // e.g. "#GA-363858"
   customer: string;
   wa: string;
   items: string;

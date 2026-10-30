@@ -1,8 +1,20 @@
 {
   "rewrites": [
     {
+      "source": "/api/send-message",
+      "destination": "https://guitars-insured-execute-gardening.trycloudflare.com/api/send-message"
+    },
+    {
+      "source": "/api/cancel-booking",
+      "destination": "https://guitars-insured-execute-gardening.trycloudflare.com/api/cancel-booking"
+    },
+    {
+      "source": "/api/reschedule-booking",
+      "destination": "https://guitars-insured-execute-gardening.trycloudflare.com/api/reschedule-booking"
+    },
+    {
       "source": "/wa-api/:path*",
-      "destination": "https://sauce-pichunter-pop-enlarge.trycloudflare.com/:path*"
+      "destination": "https://guitars-insured-execute-gardening.trycloudflare.com/:path*"
     }
   ]
 }

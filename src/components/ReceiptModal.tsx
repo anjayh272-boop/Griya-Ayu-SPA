@@ -9,7 +9,6 @@ import {
   GRIYA_AYU_QRIS_IMAGE,
   GRIYA_AYU_QRIS_MERCHANT,
   GRIYA_AYU_BANK_ACCOUNTS,
-  buildAdminWaConfirmationMessage,
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
   QRIS_PAYMENT_CHANNELS,
@@ -30,6 +29,7 @@ interface ReceiptModalProps {
     healthNote?: string
   ) => void;
   onFailFromReceipt?: (orderId: number, methodType: PaymentMethodType) => void;
+  onVerifyPayment?: (orderId: number) => void;
   onCopyText?: (text: string, label: string) => void;
 }
 
@@ -40,6 +40,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   onChangeMethodType,
   onPayFromReceipt,
   onFailFromReceipt,
+  onVerifyPayment,
   onCopyText,
 }) => {
   const [remainingMs, setRemainingMs] = useState<number>(20 * 60 * 1000);
@@ -84,7 +85,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   if (!order) return null;
 
-  const invoiceCode = `GA-${String(order.id).slice(-6)}`;
+  const trxNumber =
+    order.transactionNumber && order.transactionNumber.trim()
+      ? order.transactionNumber.trim().startsWith('#')
+        ? order.transactionNumber.trim()
+        : `#${order.transactionNumber.trim()}`
+      : `#GA-${String(order.id).slice(-6)}`;
   const isLocked = isOrderLockedStatus(order);
   const isFailed = order.paymentStatus === 'Gagal' || order.status === 'Cancelled';
   const isExpired = !isLocked && remainingMs <= 0;
@@ -153,8 +159,6 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
-  const adminToCustomerConfirmation = buildAdminWaConfirmationMessage(order);
-
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-3 backdrop-blur-sm animate-fade">
       <div className="bg-[#F9F6F0] rounded-3xl max-w-md w-full max-h-[93vh] overflow-y-auto shadow-2xl border-2 border-[#D4AF37] animate-modal-pop">
@@ -219,7 +223,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 <span className="text-[9px] text-stone-400 font-semibold block">
                   NOMOR TRANSAKSI
                 </span>
-                <span className="font-mono font-black text-xs text-[#0B261C]">#{invoiceCode}</span>
+                <span className="font-mono font-black text-xs text-[#0B261C]">{trxNumber}</span>
               </div>
               <div className="text-right">
                 <span className="text-[9px] text-stone-400 font-semibold block">
@@ -648,15 +652,18 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           {/* Notifikasi Otomatis WhatsApp Pelanggan / ACC Admin */}
           <div className="space-y-2.5">
             {isAdmin ? (
-              <a
-                href={adminToCustomerConfirmation.url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => {
+                  if (onVerifyPayment) {
+                    onVerifyPayment(order.id);
+                  }
+                }}
                 className="tactile-btn gold-shimmer-card flex items-center justify-center gap-2 w-full min-h-[48px] bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black py-3 px-4 rounded-2xl text-xs shadow-lg uppercase tracking-wider"
               >
                 <i className="fa-brands fa-whatsapp text-base"></i>
-                <span>ACC & Kirim Konfirmasi WA ke Pelanggan</span>
-              </a>
+                <span>Konfirmasi Pembayaran / Tandai Lunas & Kirim Struk WA</span>
+              </button>
             ) : isLocked ? (
               <div className="bg-gradient-to-r from-[#0B261C] via-[#143d2d] to-[#0B261C] border border-[#D4AF37]/80 rounded-2xl p-3.5 text-left shadow-md flex items-start gap-3">
                 <div className="w-9 h-9 rounded-xl bg-[#25D366]/20 border border-[#25D366]/50 text-[#25D366] flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -676,9 +683,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="tactile-btn w-full min-h-[44px] bg-stone-200 hover:bg-stone-300 text-stone-800 font-extrabold py-2.5 rounded-2xl text-xs"
+              className="tactile-btn w-full min-h-[46px] bg-[#0B261C] hover:bg-emerald-950 text-[#D4AF37] border border-[#D4AF37]/60 font-black py-3 px-4 rounded-2xl text-xs shadow-sm flex items-center justify-center gap-2"
             >
-              Tutup Struk
+              <span>Tutup Struk</span>
             </button>
           </div>
         </div>

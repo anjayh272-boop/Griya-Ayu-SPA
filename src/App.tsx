@@ -50,6 +50,9 @@ import {
   GRIYA_AYU_ADDRESS,
   GRIYA_AYU_MAPS_URL,
   GRIYA_AYU_DEFAULT_THERAPIST,
+  sendWANotification,
+  sendWhatsAppReceipt,
+  sendCancelBookingWhatsApp,
   sendBookingStatusWhatsApp,
   sendRescheduleBookingWhatsApp,
   checkBookingRescheduleEligibility,
@@ -73,6 +76,13 @@ import { AuthScreen } from './components/AuthScreen.tsx';
 import { CustomerDashboard } from './components/CustomerDashboard.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
 import { PWAInstallBanner } from './components/PWAInstallBanner.tsx';
+import {
+  triggerWhatsApp,
+  buildBookingReceiptWaMessage,
+  buildCancelBookingWaMessage,
+  buildRefundBookingWaMessage,
+  WaToastEventDetail,
+} from './services/whatsapp.ts';
 
 export default function App() {
   // Language State ('id' | 'en')
@@ -912,8 +922,10 @@ export default function App() {
 
     const methodInfo = getPaymentMethodDetails('qris', currentUser.phone);
     const newOrderId = Date.now();
+    const trxNumber = `#GA-${String(newOrderId).slice(-6)}`;
     const newPendingBooking: BookingOrder = {
       id: newOrderId,
+      transactionNumber: trxNumber,
       customer: currentUser.name,
       wa: currentUser.phone,
       items: draft.itemsSummary,
@@ -935,9 +947,7 @@ export default function App() {
     };
 
     updateBookingsAndPersist((prev) => [newPendingBooking, ...prev]);
-    void sendBookingStatusWhatsApp(newPendingBooking, 'pending', {
-      adminPhone: adminProfile?.phone,
-    });
+    void triggerWhatsApp(newPendingBooking.wa, buildBookingReceiptWaMessage(newPendingBooking));
     triggerBookingPushNotification(
       newPendingBooking.customer,
       newPendingBooking.items,
@@ -947,6 +957,22 @@ export default function App() {
     setActivePaymentOrderId(newOrderId);
     setPaymentModalOpen(true);
   };
+
+  const [waStatusBanner, setWaStatusBanner] = useState<WaToastEventDetail | null>(null);
+
+  useEffect(() => {
+    const handleWaToast = (e: Event) => {
+      const customEvt = e as CustomEvent<WaToastEventDetail>;
+      if (customEvt.detail) {
+        setWaStatusBanner(customEvt.detail);
+        window.setTimeout(() => {
+          setWaStatusBanner((prev) => (prev === customEvt.detail ? null : prev));
+        }, 5500);
+      }
+    };
+    window.addEventListener('griya-wa-toast', handleWaToast);
+    return () => window.removeEventListener('griya-wa-toast', handleWaToast);
+  }, []);
 
   // Otomatis ubah status booking Pending menjadi "Dibatalkan (Waktu Habis / Kedaluwarsa)" apabila batas waktu hitung mundur (00:00) telah berakhir
   useEffect(() => {
@@ -1034,15 +1060,22 @@ export default function App() {
     }
 
     const methodInfo = getPaymentMethodDetails(draft.payMethodType, currentUser.phone);
+    const hasExistingPendingRef = Boolean(draft.existingOrderId) || Boolean(existingOrder);
     const isUpdatingExistingPending =
-      Boolean(existingOrder) &&
-      existingOrder!.paymentStatus === 'Pending' &&
-      now < existingOrder!.expiresAt;
+      hasExistingPendingRef &&
+      (!existingOrder ||
+        (existingOrder.paymentStatus === 'Pending' && now < existingOrder.expiresAt));
 
-    const targetOrderId = isUpdatingExistingPending ? existingOrder!.id : now;
-    const targetExpiresAt = isUpdatingExistingPending
-      ? existingOrder!.expiresAt
-      : now + 20 * 60 * 1000;
+    const targetOrderId =
+      isUpdatingExistingPending && (existingOrder?.id || draft.existingOrderId)
+        ? Number(existingOrder?.id || draft.existingOrderId)
+        : now;
+    const targetTransactionNumber =
+      existingOrder?.transactionNumber || `#GA-${String(targetOrderId).slice(-6)}`;
+    const targetExpiresAt =
+      isUpdatingExistingPending && existingOrder
+        ? existingOrder.expiresAt
+        : now + 20 * 60 * 1000;
     const isCash = draft.payMethodType === 'cash';
 
     if (draft.markAsPaid && draft.pointsRedeemedCost > 0) {
@@ -1079,6 +1112,7 @@ export default function App() {
 
     const newBooking: BookingOrder = {
       id: targetOrderId,
+      transactionNumber: targetTransactionNumber,
       customer: currentUser.name,
       wa: currentUser.phone,
       items: draft.itemsSummary,
@@ -1094,7 +1128,8 @@ export default function App() {
       paymentStatus: resolvedPaymentStatus,
       expiresAt: targetExpiresAt,
       status: draft.markAsPaid ? 'Paid' : 'Pending_Payment',
-      createdAt: isUpdatingExistingPending ? existingOrder!.createdAt : nowFormatted(),
+      createdAt:
+        isUpdatingExistingPending && existingOrder ? existingOrder.createdAt : nowFormatted(),
       therapist: existingOrder?.therapist || GRIYA_AYU_DEFAULT_THERAPIST,
       verifiedDateIso: !draft.markAsPaid
         ? undefined
@@ -1114,12 +1149,11 @@ export default function App() {
       return [newBooking, ...prev];
     });
 
-    if (draft.markAsPaid) {
-      // Kirim notifikasi LUNAS / TERKONFIRMASI otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-      void sendBookingStatusWhatsApp(newBooking, 'lunas', {
-        adminPhone: adminProfile?.phone,
-      });
+    if (!draft.silentReceipt) {
+      void triggerWhatsApp(newBooking.wa, buildBookingReceiptWaMessage(newBooking));
+    }
 
+    if (draft.markAsPaid) {
       const waConfirm = buildAdminWaConfirmationMessage(newBooking);
       const adminNotif: AppNotification = {
         id: Date.now() + 1,
@@ -1175,11 +1209,6 @@ export default function App() {
       );
       triggerCelebration(`Jam ${newBooking.time} Terkunci!`);
     } else if (!isUpdatingExistingPending) {
-      // Kirim notifikasi BELUM DIBAYAR (MENUNGGU PEMBAYARAN) otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-      void sendBookingStatusWhatsApp(newBooking, 'pending', {
-        adminPhone: adminProfile?.phone,
-      });
-
       const pendingNotif: AppNotification = {
         id: Date.now() + 1,
         target: 'customer',
@@ -1330,6 +1359,8 @@ export default function App() {
 
     const updatedOrder: BookingOrder = {
       ...targetOrder,
+      transactionNumber:
+        targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`,
       payMethodType: methodType,
       payMethod: resolvedMethodLabel,
       vaNumber: details.vaNumber,
@@ -1344,10 +1375,7 @@ export default function App() {
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi LUNAS / TERKONFIRMASI otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-    void sendBookingStatusWhatsApp(updatedOrder, 'lunas', {
-      adminPhone: adminProfile?.phone,
-    });
+    void triggerWhatsApp(updatedOrder.wa, buildBookingReceiptWaMessage(updatedOrder));
 
     // Buat Notifikasi Otomatis untuk Admin beserta Kata-Kata Konfirmasi WA Pelanggan
     const waConfirm = buildAdminWaConfirmationMessage(updatedOrder);
@@ -1410,32 +1438,43 @@ export default function App() {
     showToast('Berhasil Disalin', `${label} telah disalin ke papan klip.`);
   };
 
-  // Reschedule Mandiri oleh Pelanggan (tanpa ubah layanan & tanpa bayar ulang, maksimal 4 jam sebelum jadwal awal)
+  // Reschedule oleh Pelanggan atau Admin (maksimal 4 jam sebelum jadwal awal untuk pelanggan)
   const handleRescheduleBooking = (
     orderId: number,
     newDateIso: string,
     newDatePretty: string,
-    newTimeSlot: string
+    newTimeSlot: string,
+    byAdmin?: boolean
   ) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
 
-    const eligibility = checkBookingRescheduleEligibility(
-      targetOrder.date,
-      targetOrder.time
-    );
-    if (!eligibility.canReschedule) {
-      showToast(
-        'Batas Waktu Reschedule Terlewat ⏳',
-        eligibility.remainingLabel ||
-          'Reschedule mandiri hanya dapat dilakukan maksimal 4 jam sebelum jadwal awal.'
+    if (!byAdmin) {
+      const eligibility = checkBookingRescheduleEligibility(
+        targetOrder.date,
+        targetOrder.time
       );
-      return;
+      if (!eligibility.canReschedule) {
+        showToast(
+          'Batas Waktu Reschedule Terlewat ⏳',
+          eligibility.remainingLabel ||
+            'Reschedule mandiri hanya dapat dilakukan maksimal 4 jam sebelum jadwal awal.'
+        );
+        return;
+      }
     }
 
+    const trxNumber =
+      targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`;
+    const oldBookingData = {
+      date: targetOrder.datePretty || targetOrder.date,
+      datePretty: targetOrder.datePretty,
+      time: targetOrder.time,
+    };
     const oldScheduleLabel = `${targetOrder.datePretty} • Jam ${targetOrder.time} WIB`;
     const updatedOrder: BookingOrder = {
       ...targetOrder,
+      transactionNumber: trxNumber,
       previousSchedule: oldScheduleLabel,
       date: newDateIso,
       datePretty: newDatePretty,
@@ -1447,15 +1486,15 @@ export default function App() {
       prev.map((b) => (b.id === orderId ? updatedOrder : b))
     );
 
-    // Kirim notifikasi WhatsApp pembaruan jadwal ke pelanggan & Admin via WhatsApp Gateway
-    void sendRescheduleBookingWhatsApp(updatedOrder, adminProfile?.phone);
+    // Kirim notifikasi WhatsApp pembaruan jadwal ke pelanggan & Admin via WhatsApp Gateway (/api/reschedule-booking)
+    void sendRescheduleBookingWhatsApp(updatedOrder, oldBookingData, adminProfile?.phone);
 
     const adminNotif: AppNotification = {
       id: Date.now() + 1,
       target: 'admin',
       type: 'booking_rescheduled',
-      title: `📅 Reschedule Mandiri — ${updatedOrder.customer} (#${updatedOrder.id})`,
-      message: `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) mengubah jadwal reservasi #${updatedOrder.id} dari [${oldScheduleLabel}] menjadi [${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB]. Slot lama otomatis dibuka kembali.`,
+      title: `📅 Reschedule Jadwal — ${updatedOrder.customer} (${trxNumber})`,
+      message: `${byAdmin ? 'Admin' : `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa})`} mengubah jadwal reservasi ${trxNumber} dari [${oldScheduleLabel}] menjadi [${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB]. Slot lama otomatis dibuka kembali.`,
       createdAt: nowFormatted(),
       read: false,
       orderId: updatedOrder.id,
@@ -1468,8 +1507,8 @@ export default function App() {
       target: 'customer',
       targetPhone: updatedOrder.wa,
       type: 'booking_rescheduled',
-      title: `📅 Jadwal Reservasi #${updatedOrder.id} Berhasil Diubah`,
-      message: `Jadwal reservasi Anda untuk layanan "${updatedOrder.items}" telah diubah ke ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB. Notifikasi konfirmasi juga telah dikirim ke WhatsApp Anda.`,
+      title: `📅 Jadwal Reservasi ${trxNumber} Berhasil Diubah`,
+      message: `Jadwal reservasi Anda (${trxNumber}) untuk layanan "${updatedOrder.items}" telah diubah ke ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB. Notifikasi konfirmasi juga telah dikirim ke WhatsApp Anda.`,
       createdAt: nowFormatted(),
       read: false,
       orderId: updatedOrder.id,
@@ -1478,12 +1517,12 @@ export default function App() {
     addNotificationsAndSync([adminNotif, customerNotif]);
     triggerCelebration(`Jadwal Baru ${updatedOrder.time} WIB!`);
     showToast(
-      'Jadwal Berhasil Diubah 📅',
-      `Reservasi #${updatedOrder.id} berhasil dipindahkan ke ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB. Notifikasi WhatsApp telah dikirim ke nomor Anda.`
+      'Jadwal berhasil diperbarui & notifikasi WhatsApp terkirim!',
+      `Reservasi ${trxNumber} berhasil dipindahkan dari ${oldScheduleLabel} ke ${updatedOrder.datePretty} • Jam ${updatedOrder.time} WIB.`
     );
   };
 
-  // Admin Actions: ACC / Verifikasi Pesanan -> Ubah status menjadi Lunas & Terkonfirmasi
+  // Admin Actions: Konfirmasi Pembayaran / Tandai Lunas -> Simpan Lunas & Kirim Struk Resmi via WhatsApp Gateway
   const handleVerifyPayment = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     const todayIso = getTodayIso();
@@ -1501,16 +1540,15 @@ export default function App() {
     );
 
     if (targetOrder) {
+      const trxNumber =
+        targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`;
       const verifiedOrder: BookingOrder = {
         ...targetOrder,
+        transactionNumber: trxNumber,
         status: 'Verified',
         paymentStatus: 'Lunas',
         verifiedDateIso: targetOrder.verifiedDateIso || todayIso,
       };
-      void sendBookingStatusWhatsApp(verifiedOrder, 'lunas', {
-        adminPhone: adminProfile?.phone,
-        force: true,
-      });
 
       const confirmNotif: AppNotification = {
         id: Date.now(),
@@ -1518,16 +1556,19 @@ export default function App() {
         targetPhone: targetOrder.wa,
         type: 'admin_confirmed',
         title: `✅ Pesanan Terkonfirmasi & Lunas — Jam ${targetOrder.time} WIB`,
-        message: `Halo Kak ${targetOrder.customer}, pesanan Anda di GRIYA AYU SPORT MASSAGE & SPA untuk tanggal ${targetOrder.datePretty} jam ${targetOrder.time} WIB sudah kami KONFIRMASI (Status: LUNAS). Jadwal Anda sudah terkunci. Kami tunggu kedatangannya di Griya Ayu (${GRIYA_AYU_ADDRESS}) maksimal 10 menit sebelum jadwal ya. Terima kasih!`,
+        message: `Halo Kak ${targetOrder.customer}, pesanan Anda (${trxNumber}) di GRIYA AYU SPORT MASSAGE & SPA untuk tanggal ${targetOrder.datePretty} jam ${targetOrder.time} WIB sudah kami KONFIRMASI (Status: LUNAS). Jadwal Anda sudah terkunci. Kami tunggu kedatangannya di Griya Ayu (${GRIYA_AYU_ADDRESS}) maksimal 10 menit sebelum jadwal ya. Terima kasih!`,
         createdAt: nowFormatted(),
         read: false,
         orderId: targetOrder.id,
       };
       addNotificationsAndSync([confirmNotif]);
+
       showToast(
-        'Pesanan Dikonfirmasi & WA Terkirim! ✅',
-        `Status reservasi #GA-${String(targetOrder.id).slice(-6)} (${targetOrder.customer}) telah ditandai LUNAS dan notifikasi WhatsApp otomatis telah dikirimkan ke nomor pelanggan.`
+        'Pembayaran lunas & Struk berhasil dikirim ke WhatsApp pelanggan!',
+        `Transaksi ${trxNumber} atas nama ${targetOrder.customer} telah ditandai LUNAS dan Struk Pembayaran Resmi otomatis dikirimkan ke WhatsApp pelanggan.`
       );
+
+      void triggerWhatsApp(verifiedOrder.wa, buildBookingReceiptWaMessage(verifiedOrder));
     }
 
     triggerCelebration('Pesanan Lunas & ACC ✓');
@@ -1602,8 +1643,11 @@ export default function App() {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
 
+    const trxNumber =
+      targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`;
     const cancelledPendingOrder: BookingOrder = {
       ...targetOrder,
+      transactionNumber: trxNumber,
       paymentStatus: 'Dibatalkan',
       status: 'Cancelled',
       expiresAt: Date.now(),
@@ -1620,10 +1664,8 @@ export default function App() {
       setActivePaymentOrderId(null);
     }
 
-    // Kirim notifikasi BATAL otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-    void sendBookingStatusWhatsApp(cancelledPendingOrder, 'batal', {
-      adminPhone: adminProfile?.phone,
-    });
+    // Kirim notifikasi BATAL otomatis ke WhatsApp pelanggan via triggerWhatsApp
+    void triggerWhatsApp(cancelledPendingOrder.wa, buildCancelBookingWaMessage(cancelledPendingOrder));
 
     const customerNotif: AppNotification = {
       id: Date.now() + 1,
@@ -1631,7 +1673,7 @@ export default function App() {
       targetPhone: cancelledPendingOrder.wa,
       type: 'refund_approved',
       title: `🔓 Pesanan Pending Dibatalkan — Jam ${cancelledPendingOrder.time} WIB Dilepaskan`,
-      message: `Pesanan #GA-${String(cancelledPendingOrder.id).slice(-6)} (${cancelledPendingOrder.datePretty} • Jam ${cancelledPendingOrder.time} WIB) telah berhasil dibatalkan dan slot jadwal kembali tersedia.`,
+      message: `Pesanan ${trxNumber} (${cancelledPendingOrder.datePretty} • Jam ${cancelledPendingOrder.time} WIB) telah berhasil dibatalkan dan slot jadwal kembali tersedia.`,
       createdAt: nowFormatted(),
       read: false,
       orderId: cancelledPendingOrder.id,
@@ -1639,8 +1681,8 @@ export default function App() {
 
     addNotificationsAndSync([customerNotif]);
     showToast(
-      'Pesanan berhasil dibatalkan.',
-      `Pesanan #GA-${String(cancelledPendingOrder.id).slice(-6)} (${cancelledPendingOrder.datePretty} • Jam ${cancelledPendingOrder.time} WIB) telah dibatalkan secara instan dan slot jadwal yang Anda pilih telah dilepaskan kembali.`
+      'Reservasi dibatalkan & konfirmasi terkirim ke WhatsApp.',
+      `Pesanan ${trxNumber} (${cancelledPendingOrder.datePretty} • Jam ${cancelledPendingOrder.time} WIB) telah dibatalkan dan slot jadwal telah dilepaskan kembali.`
     );
   };
 
@@ -1649,6 +1691,8 @@ export default function App() {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
 
+    const trxNumber =
+      targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`;
     const isCash =
       targetOrder.payMethodType === 'cash' ||
       refundInfo.isCashCancellation ||
@@ -1686,6 +1730,7 @@ export default function App() {
 
       const cancelledCashOrder: BookingOrder = {
         ...targetOrder,
+        transactionNumber: trxNumber,
         paymentStatus: 'Refund Selesai / Dibatalkan',
         status: 'Cancelled',
         ptsEarned: 0,
@@ -1701,17 +1746,15 @@ export default function App() {
         prev.map((b) => (b.id === orderId ? cancelledCashOrder : b))
       );
 
-      // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-      void sendBookingStatusWhatsApp(cancelledCashOrder, 'batal', {
-        adminPhone: adminProfile?.phone,
-      });
+      // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan via triggerWhatsApp
+      void triggerWhatsApp(cancelledCashOrder.wa, buildCancelBookingWaMessage(cancelledCashOrder));
 
       const adminNotif: AppNotification = {
         id: Date.now() + 1,
         target: 'admin',
         type: 'refund_requested',
         title: `🔓 Booking Cash Dibatalkan — ${cancelledCashOrder.customer} (Jam ${cancelledCashOrder.time} WIB Terbuka)`,
-        message: `Pelanggan ${cancelledCashOrder.customer} (${cancelledCashOrder.wa}) membatalkan jadwal Cash ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB. Alasan: "${refundInfo.reason}". Slot jam ${cancelledCashOrder.time} WIB kini kembali tidak terkunci.`,
+        message: `Pelanggan ${cancelledCashOrder.customer} (${cancelledCashOrder.wa}) membatalkan jadwal Cash ${trxNumber} (${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB). Alasan: "${refundInfo.reason}". Slot jam ${cancelledCashOrder.time} WIB kini kembali tidak terkunci.`,
         createdAt: nowFormatted(),
         read: false,
         orderId: cancelledCashOrder.id,
@@ -1725,7 +1768,7 @@ export default function App() {
         targetPhone: cancelledCashOrder.wa,
         type: 'refund_approved',
         title: `✅ Booking Dibatalkan — Jam ${cancelledCashOrder.time} WIB Kembali Terbuka`,
-        message: `Pesanan Anda untuk jadwal ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB telah berhasil dibatalkan dan slot jadwal kembali tidak terkunci.`,
+        message: `Pesanan Anda (${trxNumber}) untuk jadwal ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB telah berhasil dibatalkan dan slot jadwal kembali tidak terkunci.`,
         createdAt: nowFormatted(),
         read: false,
         orderId: cancelledCashOrder.id,
@@ -1734,8 +1777,8 @@ export default function App() {
       addNotificationsAndSync([adminNotif, customerNotif]);
       triggerCelebration(`Jam ${cancelledCashOrder.time} Terbuka!`);
       showToast(
-        'Booking Berhasil Dibatalkan! 🔓',
-        `Jadwal ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB telah dibatalkan dan slot jam kembali tidak terkunci.`
+        'Reservasi dibatalkan & konfirmasi terkirim ke WhatsApp.',
+        `Jadwal ${cancelledCashOrder.datePretty} • Jam ${cancelledCashOrder.time} WIB (${trxNumber}) telah dibatalkan dan slot jam kembali tidak terkunci.`
       );
       return;
     }
@@ -1744,6 +1787,7 @@ export default function App() {
     // Batalkan jadwal (slot jam langsung kembali tidak terkunci) & kirim pengajuan refund ke Admin
     const updatedOrder: BookingOrder = {
       ...targetOrder,
+      transactionNumber: trxNumber,
       paymentStatus: 'Menunggu Cek Refund Admin',
       status: 'Refund_Requested',
       refundRequest: refundInfo,
@@ -1752,19 +1796,15 @@ export default function App() {
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi pembatalan otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-    void sendBookingStatusWhatsApp(updatedOrder, 'batal', {
-      adminPhone: adminProfile?.phone,
-    });
+    // Kirim notifikasi refund otomatis ke WhatsApp pelanggan via triggerWhatsApp
+    void triggerWhatsApp(updatedOrder.wa, buildRefundBookingWaMessage(updatedOrder));
 
     const adminNotif: AppNotification = {
       id: Date.now() + 1,
       target: 'admin',
       type: 'refund_requested',
       title: `⚠️ Pengajuan Refund Masuk — ${updatedOrder.customer} (${updatedOrder.time} WIB • Slot Terbuka)`,
-      message: `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) membatalkan booking #GA-${String(
-        updatedOrder.id
-      ).slice(-6)} & mengajukan refund sebesar ${formatRupiah(updatedOrder.total)} ke rekening ${
+      message: `Pelanggan ${updatedOrder.customer} (${updatedOrder.wa}) membatalkan booking ${trxNumber} & mengajukan refund sebesar ${formatRupiah(updatedOrder.total)} ke rekening ${
         refundInfo.bankName
       } ${refundInfo.accountNumber} (a.n. ${refundInfo.accountHolder}). Slot jam ${
         updatedOrder.time
@@ -1782,7 +1822,7 @@ export default function App() {
       targetPhone: updatedOrder.wa,
       type: 'refund_requested',
       title: `⏳ Booking Dibatalkan & Menunggu Refund Admin — Jam ${updatedOrder.time} WIB`,
-      message: `Pembatalan booking & pengajuan refund sebesar ${formatRupiah(
+      message: `Pembatalan booking (${trxNumber}) & pengajuan refund sebesar ${formatRupiah(
         updatedOrder.total
       )} ke ${refundInfo.bankName} (${refundInfo.accountNumber}) telah dikirim ke Admin. Jadwal jam ${
         updatedOrder.time
@@ -1795,8 +1835,89 @@ export default function App() {
     addNotificationsAndSync([adminNotif, customerNotif]);
     triggerCelebration(`Slot ${updatedOrder.time} Terbuka!`);
     showToast(
-      'Booking Dibatalkan & Pengajuan Refund Terkirim! ⏳',
-      `Jadwal jam ${updatedOrder.time} WIB kini kembali tidak terkunci dan pengajuan refund ke rekening ${refundInfo.bankName} (${refundInfo.accountNumber}) telah masuk ke Dashboard Admin. Notifikasi pembatalan juga telah dikirim otomatis ke WhatsApp Anda.`
+      'Reservasi dibatalkan & konfirmasi terkirim ke WhatsApp.',
+      `Jadwal jam ${updatedOrder.time} WIB (${trxNumber}) kini kembali tidak terkunci dan pengajuan refund ke rekening ${refundInfo.bankName} (${refundInfo.accountNumber}) telah masuk ke Dashboard Admin.`
+    );
+  };
+
+  // Admin Membatalkan Booking Secara Langsung dari Dashboard Admin -> Panggil /api/cancel-booking
+  const handleAdminCancelBooking = (orderId: number, cancelReason?: string) => {
+    const targetOrder = bookings.find((b) => b.id === orderId);
+    if (!targetOrder) return;
+
+    const trxNumber =
+      targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`;
+    const reasonText = cancelReason?.trim() || 'Dibatalkan oleh pelanggan/admin';
+
+    // Sesuaikan poin jika ada penukaran poin sebelumnya
+    const wasAlreadyCancelled =
+      targetOrder.status === 'Cancelled' ||
+      targetOrder.status === 'Refund_Completed' ||
+      targetOrder.paymentStatus === 'Refund Selesai / Dibatalkan';
+    const ptsToDeduct = targetOrder.status === 'Completed' ? targetOrder.ptsEarned || 0 : 0;
+    const ptsToRestore = !wasAlreadyCancelled ? targetOrder.ptsRedeemedCost || 0 : 0;
+    const netPointDelta = ptsToRestore - ptsToDeduct;
+
+    if (netPointDelta !== 0) {
+      if (
+        currentUser &&
+        normalizePhoneDigits(currentUser.phone) === normalizePhoneDigits(targetOrder.wa)
+      ) {
+        setCurrentUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, points: Math.max(0, prev.points + netPointDelta) };
+          saveActiveSession(updated, isAdmin);
+          void syncCustomerToCloud(updated);
+          return updated;
+        });
+      }
+
+      setCustomers((prev) => {
+        const next = prev.map((u) => {
+          if (normalizePhoneDigits(u.phone) === normalizePhoneDigits(targetOrder.wa)) {
+            const updatedCustomer = { ...u, points: Math.max(0, u.points + netPointDelta) };
+            void syncCustomerToCloud(updatedCustomer);
+            return updatedCustomer;
+          }
+          return u;
+        });
+        saveCustomersPersistently(next);
+        return next;
+      });
+    }
+
+    const cancelledOrder: BookingOrder = {
+      ...targetOrder,
+      transactionNumber: trxNumber,
+      paymentStatus: 'Dibatalkan',
+      status: 'Cancelled',
+      ptsEarned: 0,
+      refundRejectedReason: reasonText,
+    };
+
+    updateBookingsAndPersist((prev) =>
+      prev.map((b) => (b.id === orderId ? cancelledOrder : b))
+    );
+
+    void triggerWhatsApp(cancelledOrder.wa, buildCancelBookingWaMessage(cancelledOrder));
+
+    const customerNotif: AppNotification = {
+      id: Date.now() + 1,
+      target: 'customer',
+      targetPhone: cancelledOrder.wa,
+      type: 'refund_approved',
+      title: `🔓 Reservasi ${trxNumber} Dibatalkan`,
+      message: `Reservasi Anda (${trxNumber}) untuk jadwal ${cancelledOrder.datePretty} • Jam ${cancelledOrder.time} WIB telah dibatalkan (${reasonText}). Slot jadwal kini kembali tersedia.`,
+      createdAt: nowFormatted(),
+      read: false,
+      orderId: cancelledOrder.id,
+    };
+
+    addNotificationsAndSync([customerNotif]);
+    triggerCelebration(`Jam ${cancelledOrder.time} Terbuka!`);
+    showToast(
+      'Reservasi dibatalkan & konfirmasi terkirim ke WhatsApp.',
+      `Pesanan ${trxNumber} atas nama ${cancelledOrder.customer} (${cancelledOrder.datePretty} • Jam ${cancelledOrder.time} WIB) telah dibatalkan dan konfirmasi telah dikirim ke WhatsApp pelanggan.`
     );
   };
 
@@ -1804,6 +1925,9 @@ export default function App() {
   const handleApproveRefund = (orderId: number) => {
     const targetOrder = bookings.find((b) => b.id === orderId);
     if (!targetOrder) return;
+
+    const trxNumber =
+      targetOrder.transactionNumber || `#GA-${String(targetOrder.id).slice(-6)}`;
 
     // Jika poin dari transaksi sudah pernah masuk atau ada penyesuaian poin transaksi, kurangi/batalkan poin tersebut
     const wasCompleted = targetOrder.status === 'Completed';
@@ -1841,6 +1965,7 @@ export default function App() {
 
     const updatedOrder: BookingOrder = {
       ...targetOrder,
+      transactionNumber: trxNumber,
       paymentStatus: 'Refund Selesai / Dibatalkan',
       status: 'Refund_Completed',
       ptsEarned: 0,
@@ -1851,11 +1976,8 @@ export default function App() {
 
     updateBookingsAndPersist((prev) => prev.map((b) => (b.id === orderId ? updatedOrder : b)));
 
-    // Kirim notifikasi pembatalan/refund otomatis ke WhatsApp pelanggan via WhatsApp Gateway
-    void sendBookingStatusWhatsApp(updatedOrder, 'batal', {
-      adminPhone: adminProfile?.phone,
-      force: true,
-    });
+    // Kirim notifikasi refund otomatis ke WhatsApp pelanggan via triggerWhatsApp
+    void triggerWhatsApp(updatedOrder.wa, buildRefundBookingWaMessage(updatedOrder));
 
     const waMsg = buildAdminApproveRefundWaMessage(updatedOrder);
     const customerNotif: AppNotification = {
@@ -2357,10 +2479,7 @@ export default function App() {
               updateBookingsAndPersist((prev) =>
                 prev.map((b) => (b.id === orderId ? cancelledFakeOrder : b))
               );
-              void sendBookingStatusWhatsApp(cancelledFakeOrder, 'batal', {
-                adminPhone: adminProfile?.phone,
-                force: true,
-              });
+              void triggerWhatsApp(cancelledFakeOrder.wa, buildCancelBookingWaMessage(cancelledFakeOrder));
               const rejectNotif: AppNotification = {
                 id: Date.now(),
                 target: 'customer',
@@ -2373,27 +2492,15 @@ export default function App() {
                 orderId: target.id,
               };
               addNotificationsAndSync([rejectNotif]);
-              const rawPhone = target.wa.replace(/[^0-9]/g, '');
-              const waTarget = rawPhone.startsWith('0')
-                ? '62' + rawPhone.slice(1)
-                : rawPhone;
-              const waRejectUrl = `https://wa.me/${waTarget}?text=${encodeURIComponent(
-                `Halo Kak *${target.customer}*, kami dari *Admin Griya Ayu Sport Massage & Spa*.\n\nSetelah kami melakukan pengecekan pada struk screenshot pembayaran *#GA-${String(
-                  target.id
-                ).slice(-6)}* (${target.payMethod} • ${formatRupiah(
-                  target.total
-                )}), bukti pembayaran tersebut *belum masuk ke mutasi rekening resmi / tidak valid*.\n\n📌 *Catatan Admin:* ${reason}\n\nOleh karena itu jadwal *${
-                  target.datePretty
-                } • Jam ${
-                  target.time
-                } WIB* otomatis dibatalkan dan dibuka kembali. Silakan hubungi kami atau kirimkan bukti pembayaran yang sah ya. Terima kasih.`
-              )}`;
               showToast(
-                'Pesanan Ditolak & Slot Dibuka Kembali ⚠️',
-                `Pesanan ${target.customer} telah dibatalkan karena bukti pembayaran tidak valid / palsu. Klik tombol WhatsApp untuk mengabari pelanggan.`,
-                waRejectUrl
+                'Reservasi dibatalkan & konfirmasi terkirim ke WhatsApp.',
+                `Pesanan ${target.customer} telah dibatalkan (${reason}) dan konfirmasi pembatalan otomatis dikirim ke WhatsApp pelanggan.`
               );
             }}
+            onCancelBooking={handleAdminCancelBooking}
+            onRescheduleBooking={(orderId, newDateIso, newDatePretty, newTimeSlot) =>
+              handleRescheduleBooking(orderId, newDateIso, newDatePretty, newTimeSlot, true)
+            }
             onDeleteBooking={handleDeleteBookingOrder}
             onToggleWeekdayHoliday={handleToggleWeekdayHoliday}
             onToggleCustomHolidayDate={handleToggleCustomHolidayDate}
@@ -2426,6 +2533,40 @@ export default function App() {
           </div>
         )}
 
+        {/* BANNER FEEDBACK PENGIRIMAN WHATSAPP GATEWAY */}
+        {waStatusBanner && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 w-full max-w-sm z-[70] px-4 pointer-events-auto animate-fade">
+            <div
+              className={`rounded-2xl p-3.5 shadow-2xl border-2 flex items-start justify-between gap-2.5 ${
+                waStatusBanner.ok
+                  ? 'bg-[#0B261C] text-white border-[#D4AF37]'
+                  : 'bg-red-900 text-white border-red-400'
+              }`}
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <i
+                  className={`fa-brands fa-whatsapp text-lg mt-0.5 ${
+                    waStatusBanner.ok ? 'text-[#25D366]' : 'text-red-300'
+                  }`}
+                ></i>
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-[#D4AF37]">{waStatusBanner.title}</p>
+                  <p className="text-[11px] font-medium text-emerald-50 leading-snug mt-0.5 break-words">
+                    {waStatusBanner.message}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWaStatusBanner(null)}
+                className="text-xs font-black text-white/80 hover:text-white px-1.5"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* MODAL PEMBAYARAN OTOMATIS QRIS & VIRTUAL ACCOUNT + PIN (20 MENIT) */}
         <PaymentModal
           isOpen={paymentModalOpen}
@@ -2445,6 +2586,7 @@ export default function App() {
           onChangeMethodType={handleChangeMethodType}
           onPayFromReceipt={handlePaymentSuccess}
           onFailFromReceipt={handlePaymentFailed}
+          onVerifyPayment={handleVerifyPayment}
           onCopyText={handleCopyText}
         />
 
